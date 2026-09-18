@@ -39,10 +39,25 @@ function assertSafeKey(key: string): string {
   return key;
 }
 
+/**
+ * A serverless host gives each request a fresh, empty filesystem, so a file
+ * written to local disk there is gone before anyone can look at it. Rather than
+ * accept an upload and lose it, say so.
+ */
+function assertLocalDiskIsDurable(): void {
+  if (process.env.VERCEL === "1") {
+    throw new StorageError(
+      "File storage is not configured, so uploads cannot be saved. " +
+        "Set R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY.",
+    );
+  }
+}
+
 const localDriver: StorageDriver = {
   name: "local",
 
   async put(key, bytes) {
+    assertLocalDiskIsDurable();
     await fs.mkdir(UPLOAD_DIR, { recursive: true });
     await fs.writeFile(path.join(UPLOAD_DIR, assertSafeKey(key)), bytes);
   },

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createClient, type Client, type InArgs, type Transaction } from "@libsql/client";
+import { createClient as createWebClient, type Client, type InArgs, type Transaction } from "@libsql/client/web";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -14,46 +14,55 @@ export const DATA_DIR = process.env.MOTOR_HUB_DATA_DIR
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 
 /**
- * The libSQL client speaks SQLite whether it is talking to a local file or to
- * a hosted Turso database, so the same SQL runs in development and production.
- * Set TURSO_DATABASE_URL to point at the hosted one.
+ * Opens the database.
+ *
+ * A hosted Turso database is reached over HTTP, which the `web` client does with
+ * no native code. The default export instead links the `libsql` native module —
+ * 20 MB of platform binaries that a serverless deploy neither needs nor wants —
+ * so it is imported lazily and only for a local `file:` database.
  */
-function open(): Client {
+async function open(): Promise<Client> {
   const url = process.env.TURSO_DATABASE_URL;
 
-  if (url) {
-    return createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+  if (url && !url.startsWith("file:")) {
+    return createWebClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
   }
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  return createClient({ url: `file:${path.join(DATA_DIR, "motor-hub.db")}` });
+  const { createClient } = await import("@libsql/client");
+  return createClient({ url: url ?? `file:${path.join(DATA_DIR, "motor-hub.db")}` });
 }
 
-const globalForDb = globalThis as unknown as { __motorHubDb?: Client; __motorHubReady?: Promise<void> };
+// Next reloads modules between requests in development, so the connection and
+// the one-time schema application are cached on globalThis.
+const globalForDb = globalThis as unknown as {
+  __motorHubClient?: Promise<Client>;
+  __motorHubReady?: Promise<Client>;
+};
 
-export const db: Client = globalForDb.__motorHubDb ?? open();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__motorHubDb = db;
+function client(): Promise<Client> {
+  globalForDb.__motorHubClient ??= open();
+  return globalForDb.__motorHubClient;
 }
 
 /**
  * Applies the schema once per process. Every statement is `IF NOT EXISTS`, so
- * this is safe to run against an existing database on each cold start.
+ * it is safe to run against an existing database on each cold start.
  */
-function ensureSchema(): Promise<void> {
+async function applySchema(): Promise<Client> {
+  const db = await client();
   const schema = fs.readFileSync(path.join(process.cwd(), "src", "lib", "schema.sql"), "utf8");
-  const statements = splitStatements(schema);
 
-  return (async () => {
-    for (const statement of statements) {
-      await db.execute(statement);
-    }
-  })();
+  for (const statement of splitStatements(schema)) {
+    await db.execute(statement);
+  }
+
+  return db;
 }
 
-export function ready(): Promise<void> {
-  globalForDb.__motorHubReady ??= ensureSchema();
+/** Resolves to a connection that is guaranteed to have the schema applied. */
+export function ready(): Promise<Client> {
+  globalForDb.__motorHubReady ??= applySchema();
   return globalForDb.__motorHubReady;
 }
 
@@ -78,7 +87,7 @@ function normalizeArgs(args: InArgs): InArgs {
 }
 
 export async function all<T>(sql: string, args?: InArgs): Promise<T[]> {
-  await ready();
+  const db = await ready();
   const result = await db.execute(args === undefined ? sql : { sql, args: normalizeArgs(args) });
   return result.rows.map((row) => toObject<T>(row as unknown as Record<string, unknown>));
 }
@@ -89,11 +98,10 @@ export async function one<T>(sql: string, args?: InArgs): Promise<T | null> {
 }
 
 export async function run(sql: string, args?: InArgs): Promise<void> {
-  await ready();
+  const db = await ready();
   await db.execute(args === undefined ? sql : { sql, args: normalizeArgs(args) });
 }
 
-/** Runs several writes atomically, e.g. the part replacement flow. */
 export async function txRun(tx: Transaction, sql: string, args?: InArgs): Promise<void> {
   await tx.execute(args === undefined ? sql : { sql, args: normalizeArgs(args) });
 }
@@ -103,8 +111,9 @@ export async function txAll<T>(tx: Transaction, sql: string, args?: InArgs): Pro
   return result.rows.map((row) => toObject<T>(row as unknown as Record<string, unknown>));
 }
 
+/** Runs several writes atomically, e.g. the part replacement flow. */
 export async function writeTransaction(work: (tx: Transaction) => Promise<void>): Promise<void> {
-  await ready();
+  const db = await ready();
   const tx = await db.transaction("write");
   try {
     await work(tx);

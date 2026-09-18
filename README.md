@@ -99,10 +99,14 @@ every value is explained there.
 
 4. **Deploy to Vercel.** Import the repo and add the variables above.
 
+R2 is optional for a first deploy: leave it unset and the app runs normally but
+refuses uploads with a clear message, rather than writing receipts to a disk the
+host wipes between requests. Add it whenever you like.
+
 `npm run build` runs `scripts/check-env.mjs` first, which **fails the build** on
-a hosted deploy that is missing the passphrase, the database or the bucket —
-each of those would either expose the data publicly or silently lose it. Check a
-configuration without deploying with `npm run check:env`.
+a hosted deploy with no passphrase (the data would be public) or no database
+(the data would silently vanish). Check a configuration without deploying using
+`npm run check:env`.
 
 ## Backups
 
