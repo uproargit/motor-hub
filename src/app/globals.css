@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root {
+  --canvas: #f4f5f7;
+  --surface: #ffffff;
+  --raised: #fafbfc;
+  --line: #e3e6ea;
+  --line-strong: #cfd4da;
+  --ink: #16191d;
+  --muted: #5c646e;
+  --faint: #8b939d;
+  --accent: #b4530a;
+  --accent-soft: #fdf1e5;
+  --on-accent: #ffffff;
+  --good: #11704a;
+  --good-soft: #e6f4ee;
+  --warn: #8a5a00;
+  --warn-soft: #fdf3e0;
+  --bad: #a61f2b;
+  --bad-soft: #fceced;
+  --info: #17557f;
+  --info-soft: #e8f1f8;
+}
+
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    --canvas: #0d1013;
+    --surface: #15191e;
+    --raised: #1c2128;
+    --line: #272d35;
+    --line-strong: #39414b;
+    --ink: #e9edf2;
+    --muted: #9aa4b1;
+    --faint: #6b7683;
+    --accent: #f08a2c;
+    --accent-soft: #33210f;
+    --on-accent: #1a1005;
+    --good: #43c18b;
+    --good-soft: #10281f;
+    --warn: #e0a534;
+    --warn-soft: #2d2411;
+    --bad: #f0707e;
+    --bad-soft: #31161b;
+    --info: #63aede;
+    --info-soft: #11242f;
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas: #0d1013;
+  --surface: #15191e;
+  --raised: #1c2128;
+  --line: #272d35;
+  --line-strong: #39414b;
+  --ink: #e9edf2;
+  --muted: #9aa4b1;
+  --faint: #6b7683;
+  --accent: #f08a2c;
+  --accent-soft: #33210f;
+  --on-accent: #1a1005;
+  --good: #43c18b;
+  --good-soft: #10281f;
+  --warn: #e0a534;
+  --warn-soft: #2d2411;
+  --bad: #f0707e;
+  --bad-soft: #31161b;
+  --info: #63aede;
+  --info-soft: #11242f;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Form controls inherit the surface palette so both themes stay legible. */
+input,
+select,
+textarea {
+  color-scheme: inherit;
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink
+      outline-none transition placeholder:text-faint
+      focus:border-accent focus:ring-2 focus:ring-accent/25;
+  }
+
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wide text-muted;
+  }
+
+  .card {
+    @apply rounded-xl border border-line bg-surface;
+  }
+
+  /* Tailwind v4 cannot @apply a class defined in plain CSS, so each button
+     variant spells out the shared base utilities. */
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold
+      transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-on-accent hover:opacity-90;
+  }
+
+  .btn-secondary {
+    @apply border border-line-strong bg-surface text-ink hover:bg-raised;
+  }
+
+  .btn-ghost {
+    @apply text-muted hover:bg-raised hover:text-ink;
+  }
+
+  .btn-danger {
+    @apply border border-bad/40 bg-bad-soft text-bad hover:border-bad;
+  }
+}

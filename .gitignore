@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.test-build/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local data: SQLite database and uploaded receipts/photos.
+# Created automatically on first run; relocate with MOTOR_HUB_DATA_DIR.
+data/
+
+.env
+.env*.local
+.DS_Store
+npm-debug.log*
