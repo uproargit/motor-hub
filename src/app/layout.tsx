@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { cookies } from "next/headers";
+
+import { signOutAction } from "@/lib/actions/auth";
+import { isSignedIn, SESSION_COOKIE } from "@/lib/auth";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,13 +13,19 @@ export const metadata: Metadata = {
   description: "Build sheets, parts history and maintenance tracking for every vehicle you own.",
 };
 
+// Same reason as the login page: the sign-out control depends on runtime
+// configuration, so this layout must not be prerendered.
+export const dynamic = "force-dynamic";
+
 const NAV = [
   { href: "/", label: "Dashboard" },
   { href: "/vehicles", label: "Vehicles" },
   { href: "/maintenance", label: "Maintenance" },
 ];
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const signedIn = await isSignedIn((await cookies()).get(SESSION_COOKIE)?.value);
+
   return (
     <html lang="en">
       <body className="min-h-screen">
@@ -37,6 +48,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
               ))}
             </nav>
+
+            {signedIn ? (
+              <form action={signOutAction} className="ml-auto">
+                <button
+                  type="submit"
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted transition hover:bg-raised hover:text-ink"
+                >
+                  Sign out
+                </button>
+              </form>
+            ) : null}
           </div>
         </header>
 

@@ -1,10 +1,10 @@
 import "server-only";
 
-import fs from "node:fs/promises";
 import path from "node:path";
 
-import { newId, UPLOAD_DIR } from "./db";
+import { newId } from "./db";
 import { ALLOWED_UPLOAD_MIME, isAllowedMime } from "./mime";
+import { storage } from "./storage";
 
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
@@ -19,8 +19,8 @@ export interface StoredUpload {
 export class UploadError extends Error {}
 
 /**
- * Writes an uploaded file to the data directory under a generated name. The
- * original name is kept only as metadata so it can never influence the path.
+ * Writes an uploaded file to the configured store under a generated name. The
+ * original name is kept only as metadata so it can never influence the key.
  */
 export async function storeUpload(file: File): Promise<StoredUpload> {
   if (!isAllowedMime(file.type)) {
@@ -36,8 +36,7 @@ export async function storeUpload(file: File): Promise<StoredUpload> {
   const id = newId("att");
   const storedName = `${id}${ALLOWED_UPLOAD_MIME[file.type]}`;
 
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  await fs.writeFile(path.join(UPLOAD_DIR, storedName), Buffer.from(await file.arrayBuffer()));
+  await storage.put(storedName, new Uint8Array(await file.arrayBuffer()), file.type);
 
   return {
     id,
@@ -48,15 +47,10 @@ export async function storeUpload(file: File): Promise<StoredUpload> {
   };
 }
 
-export function uploadPath(storedName: string): string {
-  // Guard against a stored name that somehow escapes the upload directory.
-  const resolved = path.resolve(UPLOAD_DIR, path.basename(storedName));
-  if (path.dirname(resolved) !== path.resolve(UPLOAD_DIR)) {
-    throw new UploadError("Invalid file reference.");
-  }
-  return resolved;
+export function readUpload(storedName: string): Promise<Uint8Array | null> {
+  return storage.get(storedName);
 }
 
 export async function deleteUploadFile(storedName: string): Promise<void> {
-  await fs.rm(uploadPath(storedName), { force: true });
+  await storage.remove(storedName);
 }

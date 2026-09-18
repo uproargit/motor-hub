@@ -10,10 +10,14 @@
     "typecheck": "tsc --noEmit",
     "seed": "node scripts/seed.mjs",
     "test": "tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js",
-    "seed:reset": "node scripts/seed.mjs --reset"
+    "seed:reset": "node scripts/seed.mjs --reset",
+    "prebuild": "node scripts/check-env.mjs",
+    "check:env": "MOTOR_HUB_ENFORCE_ENV=1 node scripts/check-env.mjs",
+    "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
+    "aws4fetch": "^1.0.20",
     "next": "16.3.5",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

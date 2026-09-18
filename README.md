@@ -56,7 +56,7 @@ replacement, service and meter reading.
 then due soon), total modification cost, parts installed, upcoming part
 maintenance, and recently installed parts.
 
-## Running it
+## Running it locally
 
 ```bash
 npm install
@@ -64,22 +64,72 @@ npm run seed      # optional: loads a demo fleet (UTV, car, boat)
 npm run dev
 ```
 
-The database is a SQLite file and uploads are plain files, both under `data/`,
-which is gitignored. Point `MOTOR_HUB_DATA_DIR` elsewhere to relocate them.
+With no environment variables set the app runs unauthenticated against a SQLite
+file in `data/`, with uploads on local disk. That is the intended development
+setup — nothing to configure.
 
 ```bash
-npm run build && npm start   # production
+npm run build && npm start   # production build
 npm run typecheck            # tsc --noEmit
 npm test                     # due-engine unit tests
 npm run seed:reset           # wipe and reload the demo fleet
+npm run backup               # dump the database to ./backups
 ```
+
+## Deploying
+
+Runs on free tiers end to end: Vercel for the app, Turso for the database,
+Cloudflare R2 for receipts and photos. Copy `.env.example` and work through it —
+every value is explained there.
+
+1. **Database — [Turso](https://turso.tech).** Create a database, then set
+   `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. The schema is applied
+   automatically on first connect. The free tier is 5 GB and does not pause on
+   inactivity.
+
+2. **File storage — [Cloudflare R2](https://developers.cloudflare.com/r2/).**
+   Create a bucket and an API token, then set `R2_ACCOUNT_ID`, `R2_BUCKET`,
+   `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`. Files are proxied through the
+   app rather than served from public URLs, so receipts stay private; R2 charges
+   nothing for egress. Set none of these and uploads fall back to local disk.
+
+3. **Access — set `MOTOR_HUB_PASSWORD`** to a shared passphrase. This turns on
+   the sign-in screen. Also set `MOTOR_HUB_SESSION_SECRET` to any long random
+   string so that changing the passphrase later does not sign everyone out.
+
+4. **Deploy to Vercel.** Import the repo and add the variables above.
+
+`npm run build` runs `scripts/check-env.mjs` first, which **fails the build** on
+a hosted deploy that is missing the passphrase, the database or the bucket —
+each of those would either expose the data publicly or silently lose it. Check a
+configuration without deploying with `npm run check:env`.
+
+## Backups
+
+`npm run backup` writes a timestamped `.sql` file of every table, against either
+the local or the hosted database. Restoring is: let the app create the schema,
+then replay the file.
+
+Nothing on a free tier backs this up for you, and the whole point of the app is
+that the record survives for years — so put it on a schedule, either a cron job
+on a machine you own or a scheduled GitHub Action with the Turso credentials as
+secrets. Note that it covers the database, not the uploaded files; R2 has its
+own bucket versioning if you want that too.
 
 ## How it is put together
 
 - **Next.js App Router** with server components for reads and server actions for
   writes; no separate API layer apart from the file route.
-- **SQLite via `better-sqlite3`.** The schema lives in `src/lib/schema.sql` and
-  is applied on connect, so there is no migration step to run.
+- **SQLite via libSQL.** The same client and the same SQL run against a local
+  file in development and a hosted Turso database in production, so deploying is
+  an environment variable rather than a code change. The schema lives in
+  `src/lib/schema.sql` and is applied on connect, so there is no migration step.
+- **Pluggable file storage** (`src/lib/storage.ts`): local disk or Cloudflare R2,
+  chosen by whether the bucket is configured.
+- **One shared passphrase** (`src/lib/auth.ts`) exchanged for an HMAC-signed,
+  HttpOnly session cookie, enforced in middleware across every route including
+  uploaded files. There are no per-person accounts because nothing in the app
+  differs per person; adding them later means a user table and an owner column.
 - **`src/lib/due.ts`** is the maintenance engine. It is pure — schedule plus a
   usage snapshot in, next-due and remaining out — so the arithmetic is covered
   by unit tests without a database.
@@ -104,7 +154,13 @@ npm run seed:reset           # wipe and reload the demo fleet
 combined triggers in both modes, month-end clamping, missing readings, and
 urgency ordering.
 
-`tests/browser-smoke.mjs` drives the write paths in a real browser (create a
-part with a schedule, log a service, replace a part, form validation, record a
-reading, upload and serve a receipt, reject a disallowed file type). It needs a
-running server and `npm i --no-save playwright`; see the header of that file.
+Two browser suites cover what unit tests cannot, both needing a running server
+and `npm i --no-save playwright` (see each file's header):
+
+- `tests/browser-smoke.mjs` — the write paths: create a part with a schedule,
+  log a service and confirm the interval restarts, replace a part and confirm
+  both records survive and stay linked, form validation, recording a reading,
+  uploading and serving a receipt, rejecting a disallowed file type.
+- `tests/auth-smoke.mjs` — the passphrase gate: redirects when signed out,
+  deep links preserved, uploaded files protected, wrong passphrase rejected,
+  cookie is HttpOnly, forged signatures rejected, sign-out clears the session.

@@ -1,8 +1,7 @@
-import fs from "node:fs/promises";
-
 import { getAttachment } from "@/lib/queries";
 import { isImage } from "@/lib/mime";
-import { uploadPath } from "@/lib/uploads";
+import { toBody } from "@/lib/storage";
+import { readUpload } from "@/lib/uploads";
 
 /**
  * Serves an uploaded receipt, invoice or photo from the data directory. Files
@@ -16,10 +15,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return new Response("Not found", { status: 404 });
   }
 
-  let file: Buffer;
-  try {
-    file = await fs.readFile(uploadPath(attachment.stored_name));
-  } catch {
+  const file = await readUpload(attachment.stored_name);
+  if (!file) {
     return new Response("File is missing from storage", { status: 404 });
   }
 
@@ -27,7 +24,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const inline = isImage(attachment.mime_type) || attachment.mime_type === "application/pdf";
   const encodedName = encodeURIComponent(attachment.file_name);
 
-  return new Response(new Uint8Array(file), {
+  return new Response(toBody(file), {
     headers: {
       "Content-Type": attachment.mime_type,
       "Content-Length": String(file.byteLength),
