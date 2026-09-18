@@ -11,8 +11,7 @@ export default async function RemovePartPage({
   params: Promise<{ vehicleId: string; partId: string }>;
 }) {
   const { vehicleId, partId } = await params;
-  const vehicle = getVehicle(vehicleId);
-  const part = getPart(partId);
+  const [vehicle, part] = await Promise.all([getVehicle(vehicleId), getPart(partId)]);
   if (!vehicle || !part || part.vehicle_id !== vehicle.id) notFound();
 
   return (

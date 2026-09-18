@@ -8,10 +8,12 @@
  * overdue, due-soon and healthy items.
  */
 
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+
+import { splitStatements } from "../src/lib/sql-file.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DATA_DIR = process.env.MOTOR_HUB_DATA_DIR ?? path.join(ROOT, "data");
@@ -19,18 +21,30 @@ const RESET = process.argv.includes("--reset");
 
 fs.mkdirSync(path.join(DATA_DIR, "uploads"), { recursive: true });
 
-const db = new Database(path.join(DATA_DIR, "motor-hub.db"));
-db.pragma("foreign_keys = ON");
-db.exec(fs.readFileSync(path.join(ROOT, "src/lib/schema.sql"), "utf8"));
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL ?? `file:${path.join(DATA_DIR, "motor-hub.db")}`,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
-const existing = db.prepare("SELECT COUNT(*) AS n FROM vehicle").get().n;
+/** Runs a statement and returns the rows. */
+async function sql(statement, args) {
+  const result = await db.execute(args === undefined ? statement : { sql: statement, args });
+  return result.rows;
+}
+
+const schema = fs.readFileSync(path.join(ROOT, "src/lib/schema.sql"), "utf8");
+for (const statement of splitStatements(schema)) {
+  await db.execute(statement);
+}
+
+const existing = Number((await sql("SELECT COUNT(*) AS n FROM vehicle"))[0].n);
 if (existing > 0 && !RESET) {
   console.log(`Database already has ${existing} vehicle(s). Re-run with --reset to replace them.`);
   process.exit(0);
 }
 if (RESET) {
   for (const table of ["attachment", "service_record", "maintenance_schedule", "part", "usage_reading", "vehicle"]) {
-    db.prepare(`DELETE FROM ${table}`).run();
+    await db.execute(`DELETE FROM ${table}`);
   }
 }
 
@@ -53,7 +67,7 @@ function addMonths(iso, months) {
 
 const cents = (dollars) => (dollars == null ? null : Math.round(dollars * 100));
 
-function insertVehicle(vehicle) {
+async function insertVehicle(vehicle) {
   const row = {
     id: id("veh"),
     nickname: null,
@@ -77,19 +91,21 @@ function insertVehicle(vehicle) {
   };
 
   const columns = Object.keys(row);
-  db.prepare(
+  await sql(
     `INSERT INTO vehicle (${columns.join(", ")}) VALUES (${columns.map((c) => `@${c}`).join(", ")})`,
-  ).run(row);
+    row,
+  );
 
-  db.prepare(
+  await sql(
     `INSERT INTO usage_reading (id, vehicle_id, recorded_on, mileage, engine_hours, source, notes, created_at)
      VALUES (?, ?, ?, ?, ?, 'MANUAL', NULL, ?)`,
-  ).run(id("usg"), row.id, today, row.current_mileage, row.current_engine_hours, now);
+    [id("usg"), row.id, today, row.current_mileage, row.current_engine_hours, now],
+  );
 
   return row.id;
 }
 
-function insertPart(vehicleId, part) {
+async function insertPart(vehicleId, part) {
   const row = {
     id: id("prt"),
     vehicle_id: vehicleId,
@@ -139,14 +155,15 @@ function insertPart(vehicleId, part) {
   };
 
   const columns = Object.keys(row);
-  db.prepare(
+  await sql(
     `INSERT INTO part (${columns.join(", ")}) VALUES (${columns.map((c) => `@${c}`).join(", ")})`,
-  ).run(row);
+    row,
+  );
 
   return row.id;
 }
 
-function insertSchedule(partId, schedule) {
+async function insertSchedule(partId, schedule) {
   const row = {
     id: id("sch"),
     part_id: partId,
@@ -167,14 +184,15 @@ function insertSchedule(partId, schedule) {
   };
 
   const columns = Object.keys(row);
-  db.prepare(
+  await sql(
     `INSERT INTO maintenance_schedule (${columns.join(", ")}) VALUES (${columns.map((c) => `@${c}`).join(", ")})`,
-  ).run(row);
+    row,
+  );
 
   return row.id;
 }
 
-function insertService(partId, service) {
+async function insertService(partId, service) {
   const row = {
     id: id("svc"),
     part_id: partId,
@@ -193,9 +211,10 @@ function insertService(partId, service) {
   };
 
   const columns = Object.keys(row);
-  db.prepare(
+  await sql(
     `INSERT INTO service_record (${columns.join(", ")}) VALUES (${columns.map((c) => `@${c}`).join(", ")})`,
-  ).run(row);
+    row,
+  );
 
   return row.id;
 }
@@ -203,7 +222,7 @@ function insertService(partId, service) {
 /* ------------------------------------------------------ 1. Polaris RZR ---- */
 // Engine-hour machine: the drive belt is 6 hours from its inspection.
 
-const rzr = insertVehicle({
+const rzr = await insertVehicle({
   year: 2024,
   make: "Polaris",
   model: "RZR",
@@ -219,7 +238,7 @@ const rzr = insertVehicle({
   notes: "Desert build. Ridden mostly at Glamis and Johnson Valley.",
 });
 
-const wheels = insertPart(rzr, {
+const wheels = await insertPart(rzr, {
   name: "Method 401 Beadlock Wheels",
   category: "WHEELS",
   manufacturer: "Method Race Wheels",
@@ -243,7 +262,7 @@ const wheels = insertPart(rzr, {
   warranty_months: 12,
   notes: "Beadlock rings torqued to 15 ft-lb in a star pattern.",
 });
-insertSchedule(wheels, {
+await insertSchedule(wheels, {
   task_type: "TORQUE",
   label: "Re-torque beadlock rings",
   interval_hours: 100,
@@ -251,7 +270,7 @@ insertSchedule(wheels, {
   base_on: addMonths(today, -6),
 });
 
-insertPart(rzr, {
+await insertPart(rzr, {
   name: "Maxxis Roxxzilla Tires",
   category: "TIRES",
   manufacturer: "Maxxis",
@@ -267,7 +286,7 @@ insertPart(rzr, {
   labor_cost_cents: cents(160),
 });
 
-insertPart(rzr, {
+await insertPart(rzr, {
   name: "Shock Therapy Stage 4 Suspension",
   category: "SUSPENSION",
   manufacturer: "Shock Therapy",
@@ -285,7 +304,7 @@ insertPart(rzr, {
   warranty_months: 24,
 });
 
-insertPart(rzr, {
+await insertPart(rzr, {
   name: "Rigid Industries 30in Adapt Light Bar",
   category: "LIGHTING",
   manufacturer: "Rigid Industries",
@@ -299,7 +318,7 @@ insertPart(rzr, {
   warranty_notes: "Lifetime warranty on LED and housing, 2 years on wiring harness.",
 });
 
-insertPart(rzr, {
+await insertPart(rzr, {
   name: "Aftermarket ECU Tune",
   category: "TUNING",
   manufacturer: "Cryo Heat",
@@ -311,7 +330,7 @@ insertPart(rzr, {
   part_cost_cents: cents(799),
 });
 
-insertPart(rzr, {
+await insertPart(rzr, {
   name: "Performance Exhaust",
   category: "EXHAUST",
   manufacturer: "HMF Racing",
@@ -324,7 +343,7 @@ insertPart(rzr, {
 });
 
 // The dashboard's warning item: 6 engine hours from its next inspection.
-const belt = insertPart(rzr, {
+const belt = await insertPart(rzr, {
   name: "Drive Belt",
   category: "CONSUMABLES",
   manufacturer: "Polaris",
@@ -337,7 +356,7 @@ const belt = insertPart(rzr, {
   part_cost_cents: cents(189.99),
   notes: "Carry a spare belt and the clutch tool on every trip.",
 });
-insertSchedule(belt, {
+await insertSchedule(belt, {
   task_type: "INSPECT",
   label: "Inspect belt and clutch sheaves",
   interval_hours: 50,
@@ -345,7 +364,7 @@ insertSchedule(belt, {
   base_on: addMonths(today, -3),
 });
 
-const rzrFilter = insertPart(rzr, {
+const rzrFilter = await insertPart(rzr, {
   name: "High-Flow Air Filter",
   category: "FILTERS",
   manufacturer: "K&N",
@@ -355,14 +374,14 @@ const rzrFilter = insertPart(rzr, {
   installed_hours: 42,
   part_cost_cents: cents(89.99),
 });
-const rzrFilterSchedule = insertSchedule(rzrFilter, {
+const rzrFilterSchedule = await insertSchedule(rzrFilter, {
   task_type: "CLEAN",
   label: "Clean and re-oil filter",
   interval_hours: 25,
   base_hours: 95,
   base_on: addMonths(today, -1),
 });
-insertService(rzrFilter, {
+await insertService(rzrFilter, {
   schedule_id: rzrFilterSchedule,
   task_type: "CLEAN",
   performed_on: addMonths(today, -1),
@@ -374,7 +393,7 @@ insertService(rzrFilter, {
 /* ---------------------------------------------------------- 2. Audi S5 ---- */
 // Mileage machine, and home of the battery replacement chain.
 
-const audi = insertVehicle({
+const audi = await insertVehicle({
   year: 2018,
   make: "Audi",
   model: "S5",
@@ -391,7 +410,7 @@ const audi = insertVehicle({
 });
 
 // Original battery: kept forever, closed out when it failed.
-const oemBattery = insertPart(audi, {
+const oemBattery = await insertPart(audi, {
   name: "OEM Battery",
   category: "ELECTRICAL",
   manufacturer: "Audi",
@@ -409,7 +428,7 @@ const oemBattery = insertPart(audi, {
   notes: "Failed to hold a charge after sitting for two weeks.",
 });
 
-const odyssey = insertPart(audi, {
+const odyssey = await insertPart(audi, {
   name: "Odyssey Extreme Battery",
   category: "ELECTRICAL",
   manufacturer: "Odyssey",
@@ -429,14 +448,14 @@ const odyssey = insertPart(audi, {
   warranty_notes: "4 year full replacement warranty. Keep the receipt.",
   replaces_part_id: oemBattery,
 });
-insertSchedule(odyssey, {
+await insertSchedule(odyssey, {
   task_type: "INSPECT",
   label: "Load test and clean terminals",
   interval_months: 12,
   base_on: addMonths(today, -3),
 });
 
-const tires = insertPart(audi, {
+const tires = await insertPart(audi, {
   name: "Michelin Pilot Sport 4S Tires",
   category: "TIRES",
   manufacturer: "Michelin",
@@ -450,14 +469,14 @@ const tires = insertPart(audi, {
   labor_cost_cents: cents(160),
   tax_cents: cents(99.51),
 });
-insertSchedule(tires, {
+await insertSchedule(tires, {
   task_type: "REPLACE",
   label: "Replace at wear limit",
   interval_miles: 15_000,
   base_mileage: 4_300,
   base_on: addMonths(today, -20),
 });
-insertSchedule(tires, {
+await insertSchedule(tires, {
   task_type: "ROTATE",
   label: "Rotate front to rear",
   interval_miles: 6_000,
@@ -466,7 +485,7 @@ insertSchedule(tires, {
   base_on: addMonths(today, -4),
 });
 
-const audiFilter = insertPart(audi, {
+const audiFilter = await insertPart(audi, {
   name: "K&N Air Filter",
   category: "FILTERS",
   manufacturer: "K&N",
@@ -476,7 +495,7 @@ const audiFilter = insertPart(audi, {
   installed_mileage: 2_400,
   part_cost_cents: cents(74.99),
 });
-const audiFilterSchedule = insertSchedule(audiFilter, {
+const audiFilterSchedule = await insertSchedule(audiFilter, {
   task_type: "CLEAN",
   label: "Clean and re-oil filter",
   interval_miles: 5_000,
@@ -488,7 +507,7 @@ for (const [months, mileage] of [
   [11, 12_400],
   [2, 17_400],
 ]) {
-  insertService(audiFilter, {
+  await insertService(audiFilter, {
     schedule_id: audiFilterSchedule,
     task_type: "CLEAN",
     performed_on: addMonths(today, -months),
@@ -497,7 +516,7 @@ for (const [months, mileage] of [
   });
 }
 
-insertPart(audi, {
+await insertPart(audi, {
   name: "APR Stage 1 ECU Tune",
   category: "TUNING",
   manufacturer: "APR",
@@ -513,7 +532,7 @@ insertPart(audi, {
   warranty_miles: 24_000,
 });
 
-insertPart(audi, {
+await insertPart(audi, {
   name: "Milltek Cat-Back Exhaust",
   category: "EXHAUST",
   manufacturer: "Milltek Sport",
@@ -529,7 +548,7 @@ insertPart(audi, {
   warranty_provider: "Milltek Sport",
 });
 
-insertPart(audi, {
+await insertPart(audi, {
   name: "Girodisc 2-Piece Front Rotors",
   category: "BRAKES",
   manufacturer: "Girodisc",
@@ -545,7 +564,7 @@ insertPart(audi, {
 /* -------------------------------------------------------------- 3. Boat --- */
 // Calendar-driven machine: the impeller is overdue by 18 days.
 
-const boat = insertVehicle({
+const boat = await insertVehicle({
   nickname: "Knot Working",
   year: 2019,
   make: "Yamaha",
@@ -561,7 +580,7 @@ const boat = insertVehicle({
   notes: "Trailered, stored covered. Flushed after every saltwater run.",
 });
 
-const impeller = insertPart(boat, {
+const impeller = await insertPart(boat, {
   name: "Jet Pump Impeller",
   category: "DRIVETRAIN",
   manufacturer: "Solas",
@@ -574,14 +593,14 @@ const impeller = insertPart(boat, {
   part_cost_cents: cents(389),
   labor_cost_cents: cents(275),
 });
-insertSchedule(impeller, {
+await insertSchedule(impeller, {
   task_type: "REPLACE",
   label: "Replace impeller",
   interval_months: 12,
   base_on: addDays(addMonths(today, -12), -18),
 });
 
-const boatOil = insertPart(boat, {
+const boatOil = await insertPart(boat, {
   name: "Engine Oil & Filter Service Kit",
   category: "FLUIDS",
   manufacturer: "Yamaha",
@@ -594,7 +613,7 @@ const boatOil = insertPart(boat, {
   part_cost_cents: cents(129.99),
   quantity: 2,
 });
-insertSchedule(boatOil, {
+await insertSchedule(boatOil, {
   task_type: "SERVICE",
   label: "Oil and filter change",
   interval_hours: 100,
@@ -603,7 +622,7 @@ insertSchedule(boatOil, {
   base_on: addMonths(today, -3),
 });
 
-insertPart(boat, {
+await insertPart(boat, {
   name: "Wet Sounds REV 10 Tower Speakers",
   category: "AUDIO",
   manufacturer: "Wet Sounds",
@@ -620,7 +639,7 @@ insertPart(boat, {
   warranty_months: 24,
 });
 
-insertPart(boat, {
+await insertPart(boat, {
   name: "Ballast Upgrade Kit",
   category: "ACCESSORIES",
   manufacturer: "Fly High",
@@ -631,13 +650,12 @@ insertPart(boat, {
   labor_cost_cents: cents(400),
 });
 
-const counts = {
-  vehicles: db.prepare("SELECT COUNT(*) AS n FROM vehicle").get().n,
-  parts: db.prepare("SELECT COUNT(*) AS n FROM part").get().n,
-  schedules: db.prepare("SELECT COUNT(*) AS n FROM maintenance_schedule").get().n,
-  services: db.prepare("SELECT COUNT(*) AS n FROM service_record").get().n,
-};
+const counts = {};
+for (const table of ["vehicle", "part", "maintenance_schedule", "service_record"]) {
+  counts[table] = Number((await sql(`SELECT COUNT(*) AS n FROM ${table}`))[0].n);
+}
 
 console.log(
-  `Seeded ${counts.vehicles} vehicles, ${counts.parts} parts, ${counts.schedules} schedules, ${counts.services} service records.`,
+  `Seeded ${counts.vehicle} vehicles, ${counts.part} parts, ` +
+    `${counts.maintenance_schedule} schedules, ${counts.service_record} service records.`,
 );

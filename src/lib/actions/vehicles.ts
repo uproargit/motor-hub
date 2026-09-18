@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { db, newId, nowIso } from "../db";
+import { all, newId, nowIso, run } from "../db";
 import { todayIso } from "../dates";
 import { getVehicle } from "../queries";
 import { deleteUploadFile } from "../uploads";
@@ -93,26 +93,28 @@ export async function createVehicleAction(_prev: FormState, formData: FormData):
     vehicleId = newId("veh");
     const timestamp = nowIso();
 
-    db.prepare(
+    await run(
       `INSERT INTO vehicle (id, ${VEHICLE_COLUMNS.join(", ")},
                             current_mileage, current_engine_hours, usage_updated_on, archived, created_at, updated_at)
        VALUES (@id, ${VEHICLE_COLUMNS.map((column) => `@${column}`).join(", ")},
                @current_mileage, @current_engine_hours, @usage_updated_on, 0, @created_at, @updated_at)`,
-    ).run({
+      {
       ...fields,
       id: vehicleId,
       current_mileage: mileage,
       current_engine_hours: hours,
-      usage_updated_on: mileage != null || hours != null ? todayIso() : null,
-      created_at: timestamp,
-      updated_at: timestamp,
-    });
+        usage_updated_on: mileage != null || hours != null ? todayIso() : null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    );
 
     if (mileage != null || hours != null) {
-      db.prepare(
+      await run(
         `INSERT INTO usage_reading (id, vehicle_id, recorded_on, mileage, engine_hours, source, notes, created_at)
          VALUES (?, ?, ?, ?, ?, 'INITIAL', NULL, ?)`,
-      ).run(newId("usg"), vehicleId, todayIso(), mileage, hours, timestamp);
+        [newId("usg"), vehicleId, todayIso(), mileage, hours, timestamp],
+      );
     }
   } catch (error) {
     return toFormState(error);
@@ -125,13 +127,14 @@ export async function createVehicleAction(_prev: FormState, formData: FormData):
 
 export async function updateVehicleAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const vehicleId = String(formData.get("vehicle_id") ?? "");
-  if (!getVehicle(vehicleId)) return { error: "That vehicle no longer exists." };
+  if (!(await getVehicle(vehicleId))) return { error: "That vehicle no longer exists." };
 
   try {
-    db.prepare(
+    await run(
       `UPDATE vehicle SET ${VEHICLE_COLUMNS.map((column) => `${column} = @${column}`).join(", ")}, updated_at = @updated_at
         WHERE id = @id`,
-    ).run({ ...vehicleFieldsFrom(formData), id: vehicleId, updated_at: nowIso() });
+      { ...vehicleFieldsFrom(formData), id: vehicleId, updated_at: nowIso() },
+    );
   } catch (error) {
     return toFormState(error);
   }
@@ -148,7 +151,7 @@ export async function updateVehicleAction(_prev: FormState, formData: FormData):
  */
 export async function recordUsageAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const vehicleId = String(formData.get("vehicle_id") ?? "");
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) return { error: "That vehicle no longer exists." };
 
   try {
@@ -161,21 +164,23 @@ export async function recordUsageAction(_prev: FormState, formData: FormData): P
     }
 
     const timestamp = nowIso();
-    db.prepare(
+    await run(
       `INSERT INTO usage_reading (id, vehicle_id, recorded_on, mileage, engine_hours, source, notes, created_at)
        VALUES (?, ?, ?, ?, ?, 'MANUAL', ?, ?)`,
-    ).run(newId("usg"), vehicleId, recordedOn, mileage, engineHours, parse.text(formData.get("notes")), timestamp);
+      [newId("usg"), vehicleId, recordedOn, mileage, engineHours, parse.text(formData.get("notes")), timestamp],
+    );
 
     // The reading is authoritative when it is the most recent one on file.
     const isLatest = vehicle.usage_updated_on == null || recordedOn >= vehicle.usage_updated_on;
     if (isLatest) {
-      db.prepare(
+      await run(
         `UPDATE vehicle
             SET current_mileage = COALESCE(?, current_mileage),
                 current_engine_hours = COALESCE(?, current_engine_hours),
                 usage_updated_on = ?, updated_at = ?
           WHERE id = ?`,
-      ).run(mileage, engineHours, recordedOn, timestamp, vehicleId);
+        [mileage, engineHours, recordedOn, timestamp, vehicleId],
+      );
     }
   } catch (error) {
     return toFormState(error);
@@ -189,14 +194,14 @@ export async function recordUsageAction(_prev: FormState, formData: FormData): P
 
 export async function setVehicleArchivedAction(formData: FormData): Promise<void> {
   const vehicleId = String(formData.get("vehicle_id") ?? "");
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) return;
 
-  db.prepare(`UPDATE vehicle SET archived = ?, updated_at = ? WHERE id = ?`).run(
+  await run(`UPDATE vehicle SET archived = ?, updated_at = ? WHERE id = ?`, [
     vehicle.archived === 1 ? 0 : 1,
     nowIso(),
     vehicleId,
-  );
+  ]);
 
   revalidatePath("/");
   revalidatePath("/vehicles");
@@ -205,17 +210,16 @@ export async function setVehicleArchivedAction(formData: FormData): Promise<void
 
 export async function deleteVehicleAction(formData: FormData): Promise<void> {
   const vehicleId = String(formData.get("vehicle_id") ?? "");
-  if (!getVehicle(vehicleId)) return;
+  if (!(await getVehicle(vehicleId))) return;
 
-  const attachments = db
-    .prepare<[string, string], { stored_name: string }>(
-      `SELECT stored_name FROM attachment
-        WHERE vehicle_id = ?
-           OR part_id IN (SELECT id FROM part WHERE vehicle_id = ?)`,
-    )
-    .all(vehicleId, vehicleId);
+  const attachments = await all<{ stored_name: string }>(
+    `SELECT stored_name FROM attachment
+      WHERE vehicle_id = ?
+         OR part_id IN (SELECT id FROM part WHERE vehicle_id = ?)`,
+    [vehicleId, vehicleId],
+  );
 
-  db.prepare(`DELETE FROM vehicle WHERE id = ?`).run(vehicleId);
+  await run(`DELETE FROM vehicle WHERE id = ?`, [vehicleId]);
   await Promise.all(attachments.map((row) => deleteUploadFile(row.stored_name)));
 
   revalidatePath("/");

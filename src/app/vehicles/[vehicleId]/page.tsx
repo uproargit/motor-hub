@@ -19,14 +19,17 @@ import {
 
 export default async function VehicleOverviewPage({ params }: { params: Promise<{ vehicleId: string }> }) {
   const { vehicleId } = await params;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
   const usage = getUsage(vehicle);
-  const counts = countParts(vehicle.id);
-  const costs = vehicleCostSummary(vehicle.id);
-  const attention = attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] });
-  const recent = decorateParts(listParts(vehicle.id, { status: "CURRENT" }).slice(0, 6), usage);
+  const [counts, costs, attention, installed] = await Promise.all([
+    countParts(vehicle.id),
+    vehicleCostSummary(vehicle.id),
+    attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
+    listParts(vehicle.id, { status: "CURRENT" }),
+  ]);
+  const recent = await decorateParts(installed.slice(0, 6), usage);
 
   return (
     <div className="space-y-6">

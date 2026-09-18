@@ -11,9 +11,8 @@ export const dynamic = "force-dynamic";
 
 const SECTIONS: DueLevel[] = ["OVERDUE", "DUE", "DUE_SOON", "OK", "UNKNOWN"];
 
-export default function MaintenancePage() {
-  const items = attentionItems();
-  const stats = fleetStats();
+export default async function MaintenancePage() {
+  const [items, stats] = await Promise.all([attentionItems(), fleetStats()]);
 
   return (
     <div className="space-y-6">

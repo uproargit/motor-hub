@@ -1,13 +1,12 @@
 import "server-only";
 
-import { db } from "./db";
+import { all, one } from "./db";
 import { todayIso } from "./dates";
 import {
   CATEGORY_GROUPS,
   CATEGORY_GROUP_ORDER,
   categoryGroupOf,
   categoryLabel,
-  PART_CATEGORIES,
   type CategoryGroup,
   type PartCategory,
   type PartStatus,
@@ -24,32 +23,34 @@ import type {
   VehicleRow,
 } from "./types";
 
+/** Sums the four cost columns; used wherever totals are aggregated in SQL. */
+const COST_SUM =
+  "COALESCE(part_cost_cents,0) + COALESCE(labor_cost_cents,0) + COALESCE(shipping_cost_cents,0) + COALESCE(tax_cents,0)";
+
 /* -------------------------------------------------------------- vehicles -- */
 
-export function listVehicles(includeArchived = false): VehicleRow[] {
-  return db
-    .prepare<[number], VehicleRow>(
-      `SELECT * FROM vehicle
-        WHERE (? = 1 OR archived = 0)
-        ORDER BY archived ASC, year DESC, make ASC, model ASC`,
-    )
-    .all(includeArchived ? 1 : 0);
+export function listVehicles(includeArchived = false): Promise<VehicleRow[]> {
+  return all<VehicleRow>(
+    `SELECT * FROM vehicle
+      WHERE (? = 1 OR archived = 0)
+      ORDER BY archived ASC, year DESC, make ASC, model ASC`,
+    [includeArchived ? 1 : 0],
+  );
 }
 
-export function getVehicle(id: string): VehicleRow | null {
-  return db.prepare<[string], VehicleRow>(`SELECT * FROM vehicle WHERE id = ?`).get(id) ?? null;
+export function getVehicle(id: string): Promise<VehicleRow | null> {
+  return one<VehicleRow>(`SELECT * FROM vehicle WHERE id = ?`, [id]);
 }
 
 export function getUsage(vehicle: VehicleRow): UsageSnapshot {
   return usageOf(vehicle, todayIso());
 }
 
-export function listUsageReadings(vehicleId: string, limit = 50): UsageReadingRow[] {
-  return db
-    .prepare<[string, number], UsageReadingRow>(
-      `SELECT * FROM usage_reading WHERE vehicle_id = ? ORDER BY recorded_on DESC, created_at DESC LIMIT ?`,
-    )
-    .all(vehicleId, limit);
+export function listUsageReadings(vehicleId: string, limit = 50): Promise<UsageReadingRow[]> {
+  return all<UsageReadingRow>(
+    `SELECT * FROM usage_reading WHERE vehicle_id = ? ORDER BY recorded_on DESC, created_at DESC LIMIT ?`,
+    [vehicleId, limit],
+  );
 }
 
 /* ----------------------------------------------------------------- parts -- */
@@ -61,9 +62,9 @@ export interface PartFilter {
   modificationsOnly?: boolean;
 }
 
-export function listParts(vehicleId: string, filter: PartFilter = {}): PartRow[] {
+export function listParts(vehicleId: string, filter: PartFilter = {}): Promise<PartRow[]> {
   const where: string[] = ["vehicle_id = @vehicleId"];
-  const params: Record<string, unknown> = { vehicleId };
+  const args: Record<string, string | number> = { vehicleId };
 
   if (filter.status === "CURRENT") {
     where.push("status = 'INSTALLED'");
@@ -71,12 +72,12 @@ export function listParts(vehicleId: string, filter: PartFilter = {}): PartRow[]
     where.push("status <> 'INSTALLED'");
   } else if (filter.status && filter.status !== "ALL") {
     where.push("status = @status");
-    params.status = filter.status;
+    args.status = filter.status;
   }
 
   if (filter.category) {
     where.push("category = @category");
-    params.category = filter.category;
+    args.category = filter.category;
   }
 
   if (filter.modificationsOnly) {
@@ -84,108 +85,92 @@ export function listParts(vehicleId: string, filter: PartFilter = {}): PartRow[]
   }
 
   if (filter.search) {
+    // ILIKE is not available in SQLite; LIKE is already case-insensitive for
+    // ASCII, and LOWER() makes that explicit for the columns we search.
     where.push(
-      `(name LIKE @search COLLATE NOCASE
-        OR manufacturer LIKE @search COLLATE NOCASE
-        OR part_number LIKE @search COLLATE NOCASE
-        OR purchase_vendor LIKE @search COLLATE NOCASE
-        OR installer_name LIKE @search COLLATE NOCASE)`,
+      `(LOWER(name) LIKE @search
+        OR LOWER(COALESCE(manufacturer,'')) LIKE @search
+        OR LOWER(COALESCE(part_number,'')) LIKE @search
+        OR LOWER(COALESCE(purchase_vendor,'')) LIKE @search
+        OR LOWER(COALESCE(installer_name,'')) LIKE @search)`,
     );
-    params.search = `%${filter.search}%`;
+    args.search = `%${filter.search.toLowerCase()}%`;
   }
 
-  return db
-    .prepare<Record<string, unknown>, PartRow>(
-      `SELECT * FROM part
-        WHERE ${where.join(" AND ")}
-        ORDER BY (installed_on IS NULL) ASC, installed_on DESC, created_at DESC`,
-    )
-    .all(params);
+  return all<PartRow>(
+    `SELECT * FROM part
+      WHERE ${where.join(" AND ")}
+      ORDER BY (installed_on IS NULL) ASC, installed_on DESC, created_at DESC`,
+    args,
+  );
 }
 
-export function getPart(id: string): PartRow | null {
-  return db.prepare<[string], PartRow>(`SELECT * FROM part WHERE id = ?`).get(id) ?? null;
+export function getPart(id: string): Promise<PartRow | null> {
+  return one<PartRow>(`SELECT * FROM part WHERE id = ?`, [id]);
 }
 
-export function countParts(vehicleId: string): { installed: number; total: number; modifications: number } {
-  const row = db
-    .prepare<[string], { installed: number; total: number; modifications: number }>(
-      `SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN status = 'INSTALLED' THEN 1 ELSE 0 END) AS installed,
-          SUM(CASE WHEN status = 'INSTALLED' AND is_modification = 1 THEN 1 ELSE 0 END) AS modifications
-        FROM part WHERE vehicle_id = ?`,
-    )
-    .get(vehicleId);
-  return { installed: row?.installed ?? 0, total: row?.total ?? 0, modifications: row?.modifications ?? 0 };
+export async function countParts(
+  vehicleId: string,
+): Promise<{ installed: number; total: number; modifications: number }> {
+  const row = await one<{ installed: number | null; total: number | null; modifications: number | null }>(
+    `SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'INSTALLED' THEN 1 ELSE 0 END) AS installed,
+        SUM(CASE WHEN status = 'INSTALLED' AND is_modification = 1 THEN 1 ELSE 0 END) AS modifications
+      FROM part WHERE vehicle_id = ?`,
+    [vehicleId],
+  );
+
+  return {
+    installed: row?.installed ?? 0,
+    total: row?.total ?? 0,
+    modifications: row?.modifications ?? 0,
+  };
 }
 
 /* ------------------------------------------------------------- schedules -- */
 
-export function listSchedules(partId: string, activeOnly = false): ScheduleRow[] {
-  return db
-    .prepare<[string, number], ScheduleRow>(
-      `SELECT * FROM maintenance_schedule
-        WHERE part_id = ? AND (? = 0 OR is_active = 1)
-        ORDER BY created_at ASC`,
-    )
-    .all(partId, activeOnly ? 1 : 0);
+export function listSchedules(partId: string, activeOnly = false): Promise<ScheduleRow[]> {
+  return all<ScheduleRow>(
+    `SELECT * FROM maintenance_schedule
+      WHERE part_id = ? AND (? = 0 OR is_active = 1)
+      ORDER BY created_at ASC`,
+    [partId, activeOnly ? 1 : 0],
+  );
 }
 
-export function getSchedule(id: string): ScheduleRow | null {
-  return db.prepare<[string], ScheduleRow>(`SELECT * FROM maintenance_schedule WHERE id = ?`).get(id) ?? null;
-}
-
-/** Active schedules for parts still fitted to the vehicle. */
-export function listVehicleSchedules(vehicleId: string): Array<{ part: PartRow; schedule: ScheduleRow }> {
-  const rows = db
-    .prepare<[string], ScheduleRow & { __part: string }>(
-      `SELECT s.* FROM maintenance_schedule s
-         JOIN part p ON p.id = s.part_id
-        WHERE p.vehicle_id = ? AND s.is_active = 1 AND p.status = 'INSTALLED'`,
-    )
-    .all(vehicleId);
-
-  const parts = new Map(listParts(vehicleId).map((part) => [part.id, part]));
-  return rows
-    .map((schedule) => ({ schedule, part: parts.get(schedule.part_id)! }))
-    .filter((entry) => entry.part != null);
+export function getSchedule(id: string): Promise<ScheduleRow | null> {
+  return one<ScheduleRow>(`SELECT * FROM maintenance_schedule WHERE id = ?`, [id]);
 }
 
 /* -------------------------------------------------------- service records -- */
 
-export function listServiceRecords(partId: string): ServiceRecordRow[] {
-  return db
-    .prepare<[string], ServiceRecordRow>(
-      `SELECT * FROM service_record WHERE part_id = ? ORDER BY performed_on DESC, created_at DESC`,
-    )
-    .all(partId);
+export function listServiceRecords(partId: string): Promise<ServiceRecordRow[]> {
+  return all<ServiceRecordRow>(
+    `SELECT * FROM service_record WHERE part_id = ? ORDER BY performed_on DESC, created_at DESC`,
+    [partId],
+  );
 }
 
-export function listVehicleServiceRecords(vehicleId: string): Array<ServiceRecordRow & { part_name: string }> {
-  return db
-    .prepare<[string], ServiceRecordRow & { part_name: string }>(
-      `SELECT r.*, p.name AS part_name
-         FROM service_record r
-         JOIN part p ON p.id = r.part_id
-        WHERE p.vehicle_id = ?
-        ORDER BY r.performed_on DESC, r.created_at DESC`,
-    )
-    .all(vehicleId);
+export function listVehicleServiceRecords(vehicleId: string): Promise<Array<ServiceRecordRow & { part_name: string }>> {
+  return all<ServiceRecordRow & { part_name: string }>(
+    `SELECT r.*, p.name AS part_name
+       FROM service_record r
+       JOIN part p ON p.id = r.part_id
+      WHERE p.vehicle_id = ?
+      ORDER BY r.performed_on DESC, r.created_at DESC`,
+    [vehicleId],
+  );
 }
 
 /* ----------------------------------------------------------- attachments -- */
 
-export function listPartAttachments(partId: string): AttachmentRow[] {
-  return db
-    .prepare<[string], AttachmentRow>(
-      `SELECT * FROM attachment WHERE part_id = ? ORDER BY created_at ASC`,
-    )
-    .all(partId);
+export function listPartAttachments(partId: string): Promise<AttachmentRow[]> {
+  return all<AttachmentRow>(`SELECT * FROM attachment WHERE part_id = ? ORDER BY created_at ASC`, [partId]);
 }
 
-export function getAttachment(id: string): AttachmentRow | null {
-  return db.prepare<[string], AttachmentRow>(`SELECT * FROM attachment WHERE id = ?`).get(id) ?? null;
+export function getAttachment(id: string): Promise<AttachmentRow | null> {
+  return one<AttachmentRow>(`SELECT * FROM attachment WHERE id = ?`, [id]);
 }
 
 /* ------------------------------------------------------ composed reads ---- */
@@ -203,15 +188,14 @@ export interface PartDetail {
   totalCents: number | null;
 }
 
-export function decorateParts(parts: PartRow[], usage: UsageSnapshot): PartDetail[] {
+export async function decorateParts(parts: PartRow[], usage: UsageSnapshot): Promise<PartDetail[]> {
   if (parts.length === 0) return [];
 
-  const placeholders = parts.map(() => "?").join(",");
-  const schedules = db
-    .prepare<string[], ScheduleRow>(
-      `SELECT * FROM maintenance_schedule WHERE part_id IN (${placeholders}) ORDER BY created_at ASC`,
-    )
-    .all(...parts.map((part) => part.id));
+  const ids = parts.map((part) => part.id);
+  const schedules = await all<ScheduleRow>(
+    `SELECT * FROM maintenance_schedule WHERE part_id IN (${ids.map(() => "?").join(",")}) ORDER BY created_at ASC`,
+    ids,
+  );
 
   const byPart = new Map<string, ScheduleRow[]>();
   for (const schedule of schedules) {
@@ -240,10 +224,10 @@ export function decorateParts(parts: PartRow[], usage: UsageSnapshot): PartDetai
   });
 }
 
-export function getPartDetail(partId: string, usage: UsageSnapshot): PartDetail | null {
-  const part = getPart(partId);
+export async function getPartDetail(partId: string, usage: UsageSnapshot): Promise<PartDetail | null> {
+  const part = await getPart(partId);
   if (!part) return null;
-  return decorateParts([part], usage)[0];
+  return (await decorateParts([part], usage))[0];
 }
 
 /* ------------------------------------------------------------ build sheet -- */
@@ -267,11 +251,12 @@ export interface BuildSheetSection {
  * Currently installed parts grouped into build-sheet sections. Modifications
  * only by default, so consumables do not clutter the build sheet.
  */
-export function buildSheet(vehicleId: string, usage: UsageSnapshot, modificationsOnly = true): BuildSheetSection[] {
-  const parts = decorateParts(
-    listParts(vehicleId, { status: "CURRENT", modificationsOnly }),
-    usage,
-  );
+export async function buildSheet(
+  vehicleId: string,
+  usage: UsageSnapshot,
+  modificationsOnly = true,
+): Promise<BuildSheetSection[]> {
+  const parts = await decorateParts(await listParts(vehicleId, { status: "CURRENT", modificationsOnly }), usage);
 
   const grouped = new Map<CategoryGroup, Map<string, PartDetail[]>>();
   for (const detail of parts) {
@@ -292,15 +277,15 @@ export function buildSheet(vehicleId: string, usage: UsageSnapshot, modification
       .sort((a, b) => categoryLabel(a[0]).localeCompare(categoryLabel(b[0])))
       .map(([category, list]) => ({ category, label: categoryLabel(category), parts: list }));
 
-    const all = entries.flatMap((entry) => entry.parts);
-    const costs = all.map((detail) => detail.totalCents).filter((value): value is number => value != null);
+    const allParts = entries.flatMap((entry) => entry.parts);
+    const costs = allParts.map((detail) => detail.totalCents).filter((value): value is number => value != null);
 
     sections.push({
       group,
       label: CATEGORY_GROUPS[group].label,
       icon: CATEGORY_GROUPS[group].icon,
       categories: entries,
-      partCount: all.length,
+      partCount: allParts.length,
       totalCents: costs.length ? costs.reduce((total, value) => total + value, 0) : null,
     });
   }
@@ -320,8 +305,16 @@ export type TimelineEvent =
  * Every recorded event for a vehicle, newest first. Replaced parts keep their
  * install and removal entries, so the record stays complete.
  */
-export function vehicleTimeline(vehicleId: string, options: { includeReadings?: boolean } = {}): TimelineEvent[] {
-  const parts = listParts(vehicleId);
+export async function vehicleTimeline(
+  vehicleId: string,
+  options: { includeReadings?: boolean } = {},
+): Promise<TimelineEvent[]> {
+  const [parts, services, readings] = await Promise.all([
+    listParts(vehicleId),
+    listVehicleServiceRecords(vehicleId),
+    options.includeReadings ? listUsageReadings(vehicleId, 200) : Promise.resolve([]),
+  ]);
+
   const partsById = new Map(parts.map((part) => [part.id, part]));
   const successorOf = new Map<string, PartRow>();
   for (const part of parts) {
@@ -337,15 +330,13 @@ export function vehicleTimeline(vehicleId: string, options: { includeReadings?: 
     }
   }
 
-  for (const record of listVehicleServiceRecords(vehicleId)) {
+  for (const record of services) {
     const part = partsById.get(record.part_id);
     if (part) events.push({ kind: "SERVICE", date: record.performed_on, part, record });
   }
 
-  if (options.includeReadings) {
-    for (const reading of listUsageReadings(vehicleId, 200)) {
-      events.push({ kind: "READING", date: reading.recorded_on, reading });
-    }
+  for (const reading of readings) {
+    events.push({ kind: "READING", date: reading.recorded_on, reading });
   }
 
   const order: Record<TimelineEvent["kind"], number> = { INSTALL: 0, REMOVAL: 1, SERVICE: 2, READING: 3 };
@@ -353,12 +344,12 @@ export function vehicleTimeline(vehicleId: string, options: { includeReadings?: 
 }
 
 /** The full replacement chain a part belongs to, oldest first. */
-export function partLineage(part: PartRow): PartRow[] {
+export async function partLineage(part: PartRow): Promise<PartRow[]> {
   const chain: PartRow[] = [part];
 
   let cursor = part;
   while (cursor.replaces_part_id) {
-    const previous = getPart(cursor.replaces_part_id);
+    const previous = await getPart(cursor.replaces_part_id);
     if (!previous || chain.some((entry) => entry.id === previous.id)) break;
     chain.unshift(previous);
     cursor = previous;
@@ -366,9 +357,10 @@ export function partLineage(part: PartRow): PartRow[] {
 
   cursor = part;
   for (;;) {
-    const next = db
-      .prepare<[string], PartRow>(`SELECT * FROM part WHERE replaces_part_id = ? ORDER BY created_at ASC LIMIT 1`)
-      .get(cursor.id);
+    const next = await one<PartRow>(
+      `SELECT * FROM part WHERE replaces_part_id = ? ORDER BY created_at ASC LIMIT 1`,
+      [cursor.id],
+    );
     if (!next || chain.some((entry) => entry.id === next.id)) break;
     chain.push(next);
     cursor = next;
@@ -388,34 +380,39 @@ export interface VehicleCostSummary {
   totalCents: number;
 }
 
-export function vehicleCostSummary(vehicleId: string): VehicleCostSummary {
-  const parts = listParts(vehicleId);
-  const summary: VehicleCostSummary = {
-    modificationCents: 0,
-    maintenanceCents: 0,
-    partsCents: 0,
-    laborCents: 0,
-    serviceCents: 0,
-    totalCents: 0,
-  };
-
-  for (const part of parts) {
-    const total = totalInstalledCents(part) ?? 0;
-    summary.partsCents += (part.part_cost_cents ?? 0) + (part.shipping_cost_cents ?? 0) + (part.tax_cents ?? 0);
-    summary.laborCents += part.labor_cost_cents ?? 0;
-    if (part.is_modification) summary.modificationCents += total;
-    else summary.maintenanceCents += total;
-  }
-
-  const service = db
-    .prepare<[string], { total: number | null }>(
+export async function vehicleCostSummary(vehicleId: string): Promise<VehicleCostSummary> {
+  const [parts, service] = await Promise.all([
+    one<{
+      modification_cents: number | null;
+      maintenance_cents: number | null;
+      parts_cents: number | null;
+      labor_cents: number | null;
+    }>(
+      `SELECT
+          SUM(CASE WHEN is_modification = 1 THEN ${COST_SUM} ELSE 0 END) AS modification_cents,
+          SUM(CASE WHEN is_modification = 0 THEN ${COST_SUM} ELSE 0 END) AS maintenance_cents,
+          SUM(COALESCE(part_cost_cents,0) + COALESCE(shipping_cost_cents,0) + COALESCE(tax_cents,0)) AS parts_cents,
+          SUM(COALESCE(labor_cost_cents,0)) AS labor_cents
+        FROM part WHERE vehicle_id = ?`,
+      [vehicleId],
+    ),
+    one<{ total: number | null }>(
       `SELECT SUM(r.cost_cents) AS total FROM service_record r
          JOIN part p ON p.id = r.part_id
         WHERE p.vehicle_id = ?`,
-    )
-    .get(vehicleId);
+      [vehicleId],
+    ),
+  ]);
 
-  summary.serviceCents = service?.total ?? 0;
+  const summary: VehicleCostSummary = {
+    modificationCents: parts?.modification_cents ?? 0,
+    maintenanceCents: parts?.maintenance_cents ?? 0,
+    partsCents: parts?.parts_cents ?? 0,
+    laborCents: parts?.labor_cents ?? 0,
+    serviceCents: service?.total ?? 0,
+    totalCents: 0,
+  };
+
   summary.totalCents = summary.modificationCents + summary.maintenanceCents + summary.serviceCents;
   return summary;
 }
@@ -427,40 +424,79 @@ export interface AttentionItem {
   due: ScheduleDue;
 }
 
-/** Active schedules across every vehicle, most urgent first. */
-export function attentionItems(options: { vehicleId?: string; levels?: ScheduleDue["level"][] } = {}): AttentionItem[] {
+/**
+ * Active schedules across every vehicle, most urgent first.
+ *
+ * Deliberately three queries regardless of how many vehicles there are: with a
+ * hosted database each round-trip costs real latency, and this powers the
+ * dashboard.
+ */
+export async function attentionItems(
+  options: { vehicleId?: string; levels?: ScheduleDue["level"][] } = {},
+): Promise<AttentionItem[]> {
   const vehicles = options.vehicleId
-    ? [getVehicle(options.vehicleId)].filter((vehicle): vehicle is VehicleRow => vehicle != null)
-    : listVehicles();
+    ? ([await getVehicle(options.vehicleId)].filter((vehicle): vehicle is VehicleRow => vehicle != null))
+    : await listVehicles();
+
+  if (vehicles.length === 0) return [];
+
+  const vehicleIds = vehicles.map((vehicle) => vehicle.id);
+  const placeholders = vehicleIds.map(() => "?").join(",");
+
+  const schedules = await all<ScheduleRow & { vehicle_id: string }>(
+    `SELECT s.*, p.vehicle_id AS vehicle_id
+       FROM maintenance_schedule s
+       JOIN part p ON p.id = s.part_id
+      WHERE p.vehicle_id IN (${placeholders})
+        AND s.is_active = 1
+        AND p.status = 'INSTALLED'`,
+    vehicleIds,
+  );
+
+  if (schedules.length === 0) return [];
+
+  const partIds = [...new Set(schedules.map((schedule) => schedule.part_id))];
+  const parts = await all<PartRow>(
+    `SELECT * FROM part WHERE id IN (${partIds.map(() => "?").join(",")})`,
+    partIds,
+  );
+
+  const partsById = new Map(parts.map((part) => [part.id, part]));
+  const vehiclesById = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+  const usageByVehicle = new Map(vehicles.map((vehicle) => [vehicle.id, getUsage(vehicle)]));
 
   const items: AttentionItem[] = [];
-  for (const vehicle of vehicles) {
-    const usage = getUsage(vehicle);
-    for (const { part, schedule } of listVehicleSchedules(vehicle.id)) {
-      const due = evaluateSchedule(schedule, usage);
-      if (options.levels && !options.levels.includes(due.level)) continue;
-      items.push({ vehicle, part, schedule, due });
-    }
+  for (const schedule of schedules) {
+    const part = partsById.get(schedule.part_id);
+    const vehicle = vehiclesById.get(schedule.vehicle_id);
+    const usage = usageByVehicle.get(schedule.vehicle_id);
+    if (!part || !vehicle || !usage) continue;
+
+    const due = evaluateSchedule(schedule, usage);
+    if (options.levels && !options.levels.includes(due.level)) continue;
+    items.push({ vehicle, part, schedule, due });
   }
 
   return items.sort((a, b) => compareDue(a.due, b.due));
 }
 
-export function recentlyInstalled(limit = 8): Array<{ vehicle: VehicleRow; part: PartRow }> {
-  const parts = db
-    .prepare<[number], PartRow>(
+export async function recentlyInstalled(limit = 8): Promise<Array<{ vehicle: VehicleRow; part: PartRow }>> {
+  const [parts, vehicles] = await Promise.all([
+    all<PartRow>(
       `SELECT p.* FROM part p
          JOIN vehicle v ON v.id = p.vehicle_id
         WHERE v.archived = 0 AND p.installed_on IS NOT NULL
         ORDER BY p.installed_on DESC, p.created_at DESC
         LIMIT ?`,
-    )
-    .all(limit);
+      [limit],
+    ),
+    listVehicles(true),
+  ]);
 
-  const vehicles = new Map(listVehicles(true).map((vehicle) => [vehicle.id, vehicle]));
+  const vehiclesById = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
   return parts
-    .map((part) => ({ part, vehicle: vehicles.get(part.vehicle_id)! }))
-    .filter((entry) => entry.vehicle != null);
+    .map((part) => ({ part, vehicle: vehiclesById.get(part.vehicle_id) }))
+    .filter((entry): entry is { part: PartRow; vehicle: VehicleRow } => entry.vehicle != null);
 }
 
 export interface FleetStats {
@@ -473,34 +509,50 @@ export interface FleetStats {
   dueSoon: number;
 }
 
-export function fleetStats(): FleetStats {
-  const vehicles = listVehicles();
+/** Fleet-wide totals in two aggregate queries plus the attention scan. */
+export async function fleetStats(): Promise<FleetStats> {
+  const [totals, serviceTotal, attention] = await Promise.all([
+    one<{
+      vehicles: number | null;
+      total_parts: number | null;
+      installed_parts: number | null;
+      modification_cents: number | null;
+      all_cents: number | null;
+    }>(
+      `SELECT
+          (SELECT COUNT(*) FROM vehicle WHERE archived = 0) AS vehicles,
+          COUNT(p.id) AS total_parts,
+          SUM(CASE WHEN p.status = 'INSTALLED' THEN 1 ELSE 0 END) AS installed_parts,
+          SUM(CASE WHEN p.is_modification = 1 THEN ${COST_SUM} ELSE 0 END) AS modification_cents,
+          SUM(${COST_SUM}) AS all_cents
+        FROM part p
+        JOIN vehicle v ON v.id = p.vehicle_id
+       WHERE v.archived = 0`,
+    ),
+    one<{ total: number | null }>(
+      `SELECT SUM(r.cost_cents) AS total
+         FROM service_record r
+         JOIN part p ON p.id = r.part_id
+         JOIN vehicle v ON v.id = p.vehicle_id
+        WHERE v.archived = 0`,
+    ),
+    attentionItems(),
+  ]);
+
   const stats: FleetStats = {
-    vehicles: vehicles.length,
-    installedParts: 0,
-    totalParts: 0,
-    modificationCents: 0,
-    totalSpendCents: 0,
+    vehicles: totals?.vehicles ?? 0,
+    installedParts: totals?.installed_parts ?? 0,
+    totalParts: totals?.total_parts ?? 0,
+    modificationCents: totals?.modification_cents ?? 0,
+    totalSpendCents: (totals?.all_cents ?? 0) + (serviceTotal?.total ?? 0),
     overdue: 0,
     dueSoon: 0,
   };
 
-  for (const vehicle of vehicles) {
-    const counts = countParts(vehicle.id);
-    stats.installedParts += counts.installed;
-    stats.totalParts += counts.total;
-
-    const costs = vehicleCostSummary(vehicle.id);
-    stats.modificationCents += costs.modificationCents;
-    stats.totalSpendCents += costs.totalCents;
-  }
-
-  for (const item of attentionItems()) {
+  for (const item of attention) {
     if (item.due.level === "OVERDUE" || item.due.level === "DUE") stats.overdue += 1;
     else if (item.due.level === "DUE_SOON") stats.dueSoon += 1;
   }
 
   return stats;
 }
-
-export const CATEGORY_LABELS = PART_CATEGORIES;

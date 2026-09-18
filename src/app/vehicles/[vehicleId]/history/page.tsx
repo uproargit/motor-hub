@@ -28,11 +28,11 @@ export default async function VehicleHistoryPage({
 }) {
   const { vehicleId } = await params;
   const { readings } = await searchParams;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
   const includeReadings = readings === "1";
-  const events = vehicleTimeline(vehicle.id, { includeReadings });
+  const events = await vehicleTimeline(vehicle.id, { includeReadings });
 
   // Group by month so a long history stays scannable.
   const groups = new Map<string, TimelineEvent[]>();

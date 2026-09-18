@@ -15,8 +15,7 @@ export default async function ReplacePartPage({
   params: Promise<{ vehicleId: string; partId: string }>;
 }) {
   const { vehicleId, partId } = await params;
-  const vehicle = getVehicle(vehicleId);
-  const outgoing = getPart(partId);
+  const [vehicle, outgoing] = await Promise.all([getVehicle(vehicleId), getPart(partId)]);
   if (!vehicle || !outgoing || outgoing.vehicle_id !== vehicle.id) notFound();
 
   return (

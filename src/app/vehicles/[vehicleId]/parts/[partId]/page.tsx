@@ -34,17 +34,19 @@ export default async function PartDetailPage({
   params: Promise<{ vehicleId: string; partId: string }>;
 }) {
   const { vehicleId, partId } = await params;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
   const usage = getUsage(vehicle);
-  const detail = getPartDetail(partId, usage);
+  const detail = await getPartDetail(partId, usage);
   if (!detail || detail.part.vehicle_id !== vehicle.id) notFound();
 
   const { part, schedules, totalCents } = detail;
-  const attachments = listPartAttachments(part.id);
-  const services = listServiceRecords(part.id);
-  const lineage = partLineage(part);
+  const [attachments, services, lineage] = await Promise.all([
+    listPartAttachments(part.id),
+    listServiceRecords(part.id),
+    partLineage(part),
+  ]);
   const warranty = warrantyStanding(part, usage);
   const onVehicle = isOnVehicle(part);
   const base = `/vehicles/${vehicle.id}/parts/${part.id}`;

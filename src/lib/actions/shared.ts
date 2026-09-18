@@ -1,6 +1,6 @@
 import "server-only";
 
-import { db, newId, nowIso } from "../db";
+import { newId, nowIso, one, run } from "../db";
 import { isValidIsoDate, todayIso } from "../dates";
 import {
   ATTACHMENT_KINDS,
@@ -86,15 +86,14 @@ export const parse = {
  * Keeps the vehicle's current readings consistent with what gets recorded
  * against it: a part installed at 42 hours proves the machine has at least 42.
  */
-export function bumpVehicleUsage(
+export async function bumpVehicleUsage(
   vehicleId: string,
   readings: { mileage?: number | null; engineHours?: number | null; on?: string | null; source: string },
-): void {
-  const vehicle = db
-    .prepare<[string], { current_mileage: number | null; current_engine_hours: number | null }>(
-      `SELECT current_mileage, current_engine_hours FROM vehicle WHERE id = ?`,
-    )
-    .get(vehicleId);
+): Promise<void> {
+  const vehicle = await one<{ current_mileage: number | null; current_engine_hours: number | null }>(
+    `SELECT current_mileage, current_engine_hours FROM vehicle WHERE id = ?`,
+    [vehicleId],
+  );
   if (!vehicle) return;
 
   const mileage = readings.mileage ?? null;
@@ -105,19 +104,21 @@ export function bumpVehicleUsage(
   if (nextMileage == null && nextHours == null) return;
 
   const on = readings.on ?? todayIso();
-  db.prepare(
+  await run(
     `UPDATE vehicle
         SET current_mileage = COALESCE(?, current_mileage),
             current_engine_hours = COALESCE(?, current_engine_hours),
             usage_updated_on = ?,
             updated_at = ?
       WHERE id = ?`,
-  ).run(nextMileage, nextHours, on, nowIso(), vehicleId);
+    [nextMileage, nextHours, on, nowIso(), vehicleId],
+  );
 
-  db.prepare(
+  await run(
     `INSERT INTO usage_reading (id, vehicle_id, recorded_on, mileage, engine_hours, source, notes, created_at)
      VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
-  ).run(newId("usg"), vehicleId, on, nextMileage, nextHours, readings.source, nowIso());
+    [newId("usg"), vehicleId, on, nextMileage, nextHours, readings.source, nowIso()],
+  );
 }
 
 /** Persists every uploaded file on a form, ignoring empty file inputs. */
@@ -134,22 +135,23 @@ export async function saveAttachments(
 
   for (const file of files) {
     const stored = await storeUpload(file);
-    db.prepare(
+    await run(
       `INSERT INTO attachment
          (id, vehicle_id, part_id, service_record_id, kind, file_name, stored_name, mime_type, size_bytes, caption, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      stored.id,
-      owner.vehicleId ?? null,
-      owner.partId ?? null,
-      owner.serviceRecordId ?? null,
-      kind,
-      stored.fileName,
-      stored.storedName,
-      stored.mimeType,
-      stored.sizeBytes,
-      textOrNull(formData.get("file_caption")),
-      nowIso(),
+      [
+        stored.id,
+        owner.vehicleId ?? null,
+        owner.partId ?? null,
+        owner.serviceRecordId ?? null,
+        kind,
+        stored.fileName,
+        stored.storedName,
+        stored.mimeType,
+        stored.sizeBytes,
+        textOrNull(formData.get("file_caption")),
+        nowIso(),
+      ],
     );
   }
 }

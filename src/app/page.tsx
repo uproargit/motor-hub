@@ -17,12 +17,15 @@ import { attentionItems, fleetStats, listVehicles, recentlyInstalled, type Atten
 
 export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  const vehicles = listVehicles();
-  const stats = fleetStats();
-  const needsAttention = attentionItems({ levels: ["OVERDUE", "DUE", "DUE_SOON"] });
-  const upcoming = attentionItems({ levels: ["OK"] }).slice(0, 6);
-  const recent = recentlyInstalled(6);
+export default async function DashboardPage() {
+  const [vehicles, stats, needsAttention, upcomingAll, recent] = await Promise.all([
+    listVehicles(),
+    fleetStats(),
+    attentionItems({ levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
+    attentionItems({ levels: ["OK"] }),
+    recentlyInstalled(6),
+  ]);
+  const upcoming = upcomingAll.slice(0, 6);
 
   if (vehicles.length === 0) {
     return (

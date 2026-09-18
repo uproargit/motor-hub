@@ -20,13 +20,15 @@ export default async function BuildSheetPage({
 }) {
   const { vehicleId } = await params;
   const { all } = await searchParams;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
   const includeEverything = all === "1";
   const usage = getUsage(vehicle);
-  const sections = buildSheet(vehicle.id, usage, !includeEverything);
-  const costs = vehicleCostSummary(vehicle.id);
+  const [sections, costs] = await Promise.all([
+    buildSheet(vehicle.id, usage, !includeEverything),
+    vehicleCostSummary(vehicle.id),
+  ]);
   const totalParts = sections.reduce((sum, section) => sum + section.partCount, 0);
 
   return (

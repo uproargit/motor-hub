@@ -23,11 +23,13 @@ export default async function VehicleMaintenancePage({
   params: Promise<{ vehicleId: string }>;
 }) {
   const { vehicleId } = await params;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
-  const items = attentionItems({ vehicleId: vehicle.id });
-  const readings = listUsageReadings(vehicle.id, 10);
+  const [items, readings] = await Promise.all([
+    attentionItems({ vehicleId: vehicle.id }),
+    listUsageReadings(vehicle.id, 10),
+  ]);
   const counts = {
     overdue: items.filter((item) => item.due.level === "OVERDUE" || item.due.level === "DUE").length,
     soon: items.filter((item) => item.due.level === "DUE_SOON").length,

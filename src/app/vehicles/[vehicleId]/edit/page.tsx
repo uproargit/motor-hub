@@ -8,7 +8,7 @@ import { getVehicle } from "@/lib/queries";
 
 export default async function EditVehiclePage({ params }: { params: Promise<{ vehicleId: string }> }) {
   const { vehicleId } = await params;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
   return (

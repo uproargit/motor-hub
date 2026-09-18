@@ -1,9 +1,7 @@
 -- Motor Hub schema.
 -- Money is stored in integer cents. Dates are ISO 'YYYY-MM-DD' strings.
 -- Timestamps are ISO-8601 UTC strings.
-
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+-- libSQL enforces foreign keys by default, so no PRAGMA is needed.
 
 CREATE TABLE IF NOT EXISTS vehicle (
   id                   TEXT PRIMARY KEY,

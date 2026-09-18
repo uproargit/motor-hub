@@ -9,8 +9,21 @@ import { attentionItems, countParts, listVehicles, vehicleCostSummary } from "@/
 
 export const dynamic = "force-dynamic";
 
-export default function VehiclesPage() {
-  const vehicles = listVehicles(true);
+export default async function VehiclesPage() {
+  const vehicles = await listVehicles(true);
+
+  // Each card needs its own rollups, so they are gathered up front rather than
+  // fetched inside the render.
+  const cards = await Promise.all(
+    vehicles.map(async (vehicle) => {
+      const [counts, costs, attention] = await Promise.all([
+        countParts(vehicle.id),
+        vehicleCostSummary(vehicle.id),
+        attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
+      ]);
+      return { vehicle, counts, costs, attention, type: VEHICLE_TYPES[vehicle.vehicle_type] };
+    }),
+  );
 
   return (
     <div className="space-y-6">
@@ -39,12 +52,7 @@ export default function VehiclesPage() {
         </Card>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
-          {vehicles.map((vehicle) => {
-            const counts = countParts(vehicle.id);
-            const costs = vehicleCostSummary(vehicle.id);
-            const attention = attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] });
-            const type = VEHICLE_TYPES[vehicle.vehicle_type];
-
+          {cards.map(({ vehicle, counts, costs, attention, type }) => {
             return (
               <li key={vehicle.id}>
                 <Link

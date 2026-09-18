@@ -23,7 +23,7 @@ export default async function PartsPage({
 }) {
   const { vehicleId } = await params;
   const query = await searchParams;
-  const vehicle = getVehicle(vehicleId);
+  const vehicle = await getVehicle(vehicleId);
   if (!vehicle) notFound();
 
   const status = (query.status ?? "CURRENT") as PartFilter["status"];
@@ -31,7 +31,7 @@ export default async function PartsPage({
   const search = query.q?.trim() || undefined;
 
   const usage = getUsage(vehicle);
-  const parts = decorateParts(listParts(vehicle.id, { status, category, search }), usage);
+  const parts = await decorateParts(await listParts(vehicle.id, { status, category, search }), usage);
   const totalCents = parts.reduce((sum, detail) => sum + (detail.totalCents ?? 0), 0);
 
   return (

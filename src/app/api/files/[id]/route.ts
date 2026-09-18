@@ -11,7 +11,7 @@ import { uploadPath } from "@/lib/uploads";
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const attachment = getAttachment(id);
+  const attachment = await getAttachment(id);
   if (!attachment) {
     return new Response("Not found", { status: 404 });
   }
