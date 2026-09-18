@@ -6,6 +6,9 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 
+# Vercel CLI project link (contains your project and org ids)
+.vercel/
+
 # Local data: SQLite database and uploaded receipts/photos.
 # Created automatically on first run; relocate with MOTOR_HUB_DATA_DIR.
 data/

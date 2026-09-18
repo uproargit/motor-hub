@@ -13,7 +13,12 @@
     "seed:reset": "node scripts/seed.mjs --reset",
     "prebuild": "node scripts/check-env.mjs",
     "check:env": "MOTOR_HUB_ENFORCE_ENV=1 node scripts/check-env.mjs",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "deploy": "vercel deploy --prod",
+    "deploy:preview": "vercel deploy",
+    "vercel:login": "vercel login",
+    "vercel:link": "vercel link",
+    "env:pull": "vercel env pull .env.local"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
@@ -30,6 +35,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "tailwindcss": "^4.1.18",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vercel": "^59.23.2"
   }
 }

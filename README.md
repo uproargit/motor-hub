@@ -97,7 +97,19 @@ every value is explained there.
    the sign-in screen. Also set `MOTOR_HUB_SESSION_SECRET` to any long random
    string so that changing the passphrase later does not sign everyone out.
 
-4. **Deploy to Vercel.** Import the repo and add the variables above.
+4. **Deploy to Vercel**, either from the dashboard (import the repo, paste the
+   variables above) or from the CLI, which is bundled as a dev dependency:
+
+   ```bash
+   npm run vercel:login    # once, opens a browser
+   npm run vercel:link     # once, connects this folder to a Vercel project
+   npm run deploy          # production deploy
+   npm run deploy:preview  # a throwaway preview URL
+   ```
+
+   Once the variables are set in Vercel, `npm run env:pull` writes them into a
+   local `.env.local`, so development runs against the same database without
+   copying secrets around by hand.
 
 R2 is optional for a first deploy: leave it unset and the app runs normally but
 refuses uploads with a clear message, rather than writing receipts to a disk the
