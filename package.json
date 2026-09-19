@@ -18,7 +18,8 @@
     "deploy:preview": "vercel deploy",
     "vercel:login": "vercel login",
     "vercel:link": "vercel link",
-    "env:pull": "vercel env pull .env.local"
+    "env:pull": "vercel env pull .env.local",
+    "env:push": "node scripts/env-push.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

@@ -18,3 +18,7 @@ data/
 .DS_Store
 npm-debug.log*
 backups/
+.vercel
+.env
+.env.local
+.env.*.local
