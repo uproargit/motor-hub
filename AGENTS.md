@@ -35,3 +35,35 @@ Say the cost out loud in the design, even when it is negligible: "this adds one
 indexed query per vehicle page" is a complete answer. Prefer the cheaper of two
 otherwise equal designs, and when the more expensive one is right, say why it
 earns the cost.
+
+## Accounts and connections
+
+Two sets of accounts exist on the machines this repo is developed on, and the
+default is the wrong one for this project. Check before connecting anything.
+
+| Service | Use | Not |
+| --- | --- | --- |
+| GitHub | `uproargit` — remote is `uproargit/motor-hub` | `havok-consulting` |
+| Vercel | `uproargroup` (team `UproarDev`), project `motor-hub` | `havok-consulting` / `havok-consultings-projects` |
+| Turso | database in region `iad`, matching `"regions": ["iad1"]` in `vercel.json` | — |
+
+The `gh` CLI holds both GitHub accounts and pushes as whichever is active, so
+switch before pushing and switch back afterwards if you work in other repos:
+
+```bash
+gh auth switch --hostname github.com --user uproargit
+```
+
+Pinning the account per repo with `credential.https://github.com.username` does
+not work here: git stops consulting the `gh` credential helper and asks for a
+password instead.
+
+Wrong account shows up as one of these, and neither means the work is broken —
+only that it went somewhere else:
+
+- `remote: Permission to uproargit/motor-hub.git denied to havok-consulting.`
+- `vercel link` silently creating the project under the wrong scope. Confirm
+  with `vercel whoami` (expect `uproargroup`) before linking or deploying.
+
+Pushing to the production branch deploys automatically, so a push and a
+`npm run deploy` in quick succession produce two builds of the same commit.
