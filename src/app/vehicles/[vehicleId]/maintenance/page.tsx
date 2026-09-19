@@ -41,6 +41,11 @@ export default async function VehicleMaintenancePage({
       <PageHeader
         title="Maintenance"
         description="Every active schedule on parts currently fitted to this vehicle."
+        actions={
+          <Link href={`/vehicles/${vehicle.id}/maintenance/setup`} className="btn-secondary">
+            Add factory schedule
+          </Link>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -56,11 +61,16 @@ export default async function VehicleMaintenancePage({
               <EmptyState
                 icon="🗓️"
                 title="No schedules yet"
-                description="Open a part and add an interval in miles, engine hours or months."
+                description="Start from the common factory intervals for this kind of machine, or open a part and add an interval in miles, engine hours or months."
                 action={
-                  <Link href={`/vehicles/${vehicle.id}/parts`} className="btn-secondary">
-                    Browse parts
-                  </Link>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Link href={`/vehicles/${vehicle.id}/maintenance/setup`} className="btn-primary">
+                      Start from a factory schedule
+                    </Link>
+                    <Link href={`/vehicles/${vehicle.id}/parts`} className="btn-secondary">
+                      Browse parts
+                    </Link>
+                  </div>
                 }
               />
             </Card>

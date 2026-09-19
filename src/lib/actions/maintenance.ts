@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
-import { all, newId, nowIso, one, run } from "../db";
+import { all, newId, nowIso, one, run, txRun, writeTransaction } from "../db";
 import { todayIso } from "../dates";
 import { getPart, getSchedule, getVehicle } from "../queries";
+import { starterSchedulesFor } from "../starter-schedules";
 import { deleteUploadFile } from "../uploads";
 import {
   bumpVehicleUsage,
@@ -243,4 +244,100 @@ export async function deleteServiceRecordAction(formData: FormData): Promise<voi
   await Promise.all(attachments.map((row) => deleteUploadFile(row.stored_name)));
 
   if (part) revalidateVehicle(part.vehicle_id);
+}
+
+/**
+ * Creates the ticked starter intervals in one transaction: a consumable part
+ * row per preset, plus its schedule. Kept off the build sheet, because none of
+ * these are modifications.
+ *
+ * Intervals count from where the vehicle is now rather than from an install
+ * point, since nothing was installed — the vehicle simply starts being tracked
+ * today.
+ */
+export async function applyStarterSchedulesAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const vehicleId = String(formData.get("vehicle_id") ?? "");
+  const vehicle = await getVehicle(vehicleId);
+  if (!vehicle) return { error: "That vehicle no longer exists." };
+
+  try {
+    const chosen = new Set(formData.getAll("preset").map(String));
+    const presets = starterSchedulesFor(vehicle).filter((preset) => chosen.has(preset.key));
+
+    if (presets.length === 0) {
+      throw new ValidationError("Tick at least one interval to add.");
+    }
+
+    // The form ships an editable copy of every interval, so the saved numbers
+    // are whatever the owner's manual says rather than the generic default.
+    const rows = presets.map((preset) => {
+      const miles = parse.int(formData.get(`miles_${preset.key}`));
+      const hours = parse.float(formData.get(`hours_${preset.key}`));
+      const months = parse.int(formData.get(`months_${preset.key}`));
+
+      const intervals = {
+        interval_miles: miles && miles > 0 ? miles : null,
+        interval_hours: hours && hours > 0 ? hours : null,
+        interval_months: months && months > 0 ? months : null,
+      };
+
+      if (!intervals.interval_miles && !intervals.interval_hours && !intervals.interval_months) {
+        throw new ValidationError(`${preset.part_name}: set an interval or untick it.`);
+      }
+
+      return { preset, intervals };
+    });
+
+    const timestamp = nowIso();
+    const today = todayIso();
+
+    await writeTransaction(async (tx) => {
+      for (const { preset, intervals } of rows) {
+        const partId = newId("part");
+
+        await txRun(
+          tx,
+          `INSERT INTO part (id, vehicle_id, name, category, quantity, is_modification, is_oem,
+                             status, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 1, 0, 0, 'INSTALLED', ?, ?, ?)`,
+          [
+            partId,
+            vehicle.id,
+            preset.part_name,
+            preset.category,
+            "Created from the starter maintenance set.",
+            timestamp,
+            timestamp,
+          ],
+        );
+
+        await txRun(
+          tx,
+          `INSERT INTO maintenance_schedule
+             (id, part_id, task_type, label, interval_miles, interval_hours, interval_months,
+              trigger_mode, base_mileage, base_hours, base_on, is_active, notes, created_at, updated_at)
+           VALUES (@id, @part_id, @task_type, @label, @interval_miles, @interval_hours, @interval_months,
+                   @trigger_mode, @base_mileage, @base_hours, @base_on, 1, NULL, @created_at, @updated_at)`,
+          {
+            ...intervals,
+            id: newId("sch"),
+            part_id: partId,
+            task_type: preset.task_type,
+            label: preset.label,
+            trigger_mode: preset.trigger_mode,
+            base_mileage: vehicle.current_mileage,
+            base_hours: vehicle.current_engine_hours,
+            base_on: today,
+            created_at: timestamp,
+            updated_at: timestamp,
+          },
+        );
+      }
+    });
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidateVehicle(vehicleId);
+  return { ok: true };
 }

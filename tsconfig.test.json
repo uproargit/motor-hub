@@ -7,7 +7,17 @@
     "outDir": ".test-build",
     "jsx": "react-jsx",
     "incremental": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/lib/dates.ts", "src/lib/due.ts", "src/lib/format.ts", "src/lib/domain.ts", "src/lib/types.ts", "tests/**/*.ts"]
+  "include": [
+    "src/lib/dates.ts",
+    "src/lib/due.ts",
+    "src/lib/format.ts",
+    "src/lib/domain.ts",
+    "src/lib/types.ts",
+    "src/lib/starter-schedules.ts",
+    "tests/**/*.ts"
+  ]
 }
