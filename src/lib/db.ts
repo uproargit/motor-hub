@@ -46,6 +46,30 @@ function client(): Promise<Client> {
 }
 
 /**
+ * Columns added to a table that already exists in deployed databases. SQLite
+ * has no `ADD COLUMN IF NOT EXISTS`, and the schema file only ever creates
+ * tables, so a new column has to be applied separately. Each entry is additive
+ * and nullable: no table is rebuilt and no existing row changes.
+ */
+const ADDED_COLUMNS: Array<{ table: string; column: string; definition: string }> = [
+  {
+    table: "vehicle",
+    column: "parent_vehicle_id",
+    definition: "TEXT REFERENCES vehicle(id) ON DELETE SET NULL",
+  },
+];
+
+async function applyAddedColumns(db: Client): Promise<void> {
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    const existing = await db.execute(`PRAGMA table_info(${table})`);
+    const present = existing.rows.some((row) => (row as unknown as { name: string }).name === column);
+    if (present) continue;
+
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+/**
  * Applies the schema once per process. Every statement is `IF NOT EXISTS`, so
  * it is safe to run against an existing database on each cold start.
  */
@@ -56,6 +80,8 @@ async function applySchema(): Promise<Client> {
   for (const statement of splitStatements(schema)) {
     await db.execute(statement);
   }
+
+  await applyAddedColumns(db);
 
   return db;
 }

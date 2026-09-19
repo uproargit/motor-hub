@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 
 import { all, newId, nowIso, run } from "../db";
 import { todayIso } from "../dates";
-import { getVehicle } from "../queries";
+import { eligibleParents } from "../fleet";
+import { getVehicle, listVehicles } from "../queries";
 import { deleteUploadFile } from "../uploads";
 import {
   enums,
@@ -32,6 +33,7 @@ interface VehicleFields {
   purchase_price_cents: number | null;
   tracks_mileage: number;
   tracks_engine_hours: number;
+  parent_vehicle_id: string | null;
   notes: string | null;
 }
 
@@ -49,6 +51,7 @@ const VEHICLE_COLUMNS: Array<keyof VehicleFields> = [
   "purchase_price_cents",
   "tracks_mileage",
   "tracks_engine_hours",
+  "parent_vehicle_id",
   "notes",
 ];
 
@@ -72,6 +75,7 @@ function vehicleFieldsFrom(formData: FormData): VehicleFields {
     purchase_price_cents: parse.money(formData.get("purchase_price")),
     tracks_mileage: parse.flag(formData.get("tracks_mileage")),
     tracks_engine_hours: parse.flag(formData.get("tracks_engine_hours")),
+    parent_vehicle_id: parse.text(formData.get("parent_vehicle_id")),
     notes: parse.text(formData.get("notes")),
   };
 
@@ -82,11 +86,31 @@ function vehicleFieldsFrom(formData: FormData): VehicleFields {
   return fields;
 }
 
+/**
+ * The attachment is one level deep, so the chosen parent has to be a vehicle
+ * that is not itself attached to something — and a vehicle that already has
+ * something attached cannot become a child. Costs one read of a table that
+ * holds a handful of rows, and only when a parent was actually picked.
+ */
+async function assertParentAllowed(fields: VehicleFields, vehicleId: string | null): Promise<void> {
+  if (fields.parent_vehicle_id == null) return;
+
+  const fleet = await listVehicles(true);
+  const allowed = eligibleParents(fleet, vehicleId);
+
+  if (!allowed.some((vehicle) => vehicle.id === fields.parent_vehicle_id)) {
+    throw new ValidationError(
+      "That vehicle cannot be the parent: it is already attached to another, or this one has something attached to it.",
+    );
+  }
+}
+
 export async function createVehicleAction(_prev: FormState, formData: FormData): Promise<FormState> {
   let vehicleId: string;
 
   try {
     const fields = vehicleFieldsFrom(formData);
+    await assertParentAllowed(fields, null);
     const mileage = parse.int(formData.get("current_mileage"));
     const hours = parse.float(formData.get("current_engine_hours"));
 
@@ -130,10 +154,13 @@ export async function updateVehicleAction(_prev: FormState, formData: FormData):
   if (!(await getVehicle(vehicleId))) return { error: "That vehicle no longer exists." };
 
   try {
+    const fields = vehicleFieldsFrom(formData);
+    await assertParentAllowed(fields, vehicleId);
+
     await run(
       `UPDATE vehicle SET ${VEHICLE_COLUMNS.map((column) => `${column} = @${column}`).join(", ")}, updated_at = @updated_at
         WHERE id = @id`,
-      { ...vehicleFieldsFrom(formData), id: vehicleId, updated_at: nowIso() },
+      { ...fields, id: vehicleId, updated_at: nowIso() },
     );
   } catch (error) {
     return toFormState(error);

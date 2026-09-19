@@ -4,13 +4,16 @@ import { Card, EmptyState, PageHeader, Pill } from "@/components/ui";
 import { formatDate } from "@/lib/dates";
 import { VEHICLE_TYPES } from "@/lib/domain";
 import { formatHours, formatMiles, formatMoney, pluralize } from "@/lib/format";
+import { childrenOf, groupedFleet } from "@/lib/fleet";
 import { vehicleTitle, vehicleDescription } from "@/lib/part-logic";
 import { attentionItems, countParts, listVehicles, vehicleCostSummary } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function VehiclesPage() {
-  const vehicles = await listVehicles(true);
+  const fleet = await listVehicles(true);
+  const vehicles = groupedFleet(fleet);
+  const byId = new Map(fleet.map((vehicle) => [vehicle.id, vehicle]));
 
   // Each card needs its own rollups, so they are gathered up front rather than
   // fetched inside the render.
@@ -21,7 +24,15 @@ export default async function VehiclesPage() {
         vehicleCostSummary(vehicle.id),
         attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
       ]);
-      return { vehicle, counts, costs, attention, type: VEHICLE_TYPES[vehicle.vehicle_type] };
+      return {
+        vehicle,
+        counts,
+        costs,
+        attention,
+        type: VEHICLE_TYPES[vehicle.vehicle_type],
+        parent: vehicle.parent_vehicle_id ? (byId.get(vehicle.parent_vehicle_id) ?? null) : null,
+        attached: childrenOf(fleet, vehicle.id),
+      };
     }),
   );
 
@@ -52,7 +63,7 @@ export default async function VehiclesPage() {
         </Card>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
-          {cards.map(({ vehicle, counts, costs, attention, type }) => {
+          {cards.map(({ vehicle, counts, costs, attention, type, parent, attached }) => {
             return (
               <li key={vehicle.id}>
                 <Link
@@ -70,6 +81,14 @@ export default async function VehiclesPage() {
                       </div>
                       {vehicle.nickname ? (
                         <p className="mt-0.5 text-sm text-muted">{vehicleDescription(vehicle)}</p>
+                      ) : null}
+                      {parent ? (
+                        <p className="mt-0.5 text-sm text-muted">Goes with {vehicleTitle(parent)}</p>
+                      ) : null}
+                      {attached.length > 0 ? (
+                        <p className="mt-0.5 text-sm text-muted">
+                          With {attached.map((item) => vehicleTitle(item)).join(", ")}
+                        </p>
                       ) : null}
                     </div>
                     {attention.length > 0 ? (

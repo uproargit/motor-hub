@@ -28,6 +28,8 @@ export interface VehicleRow {
   current_mileage: number | null;
   current_engine_hours: number | null;
   usage_updated_on: string | null;
+  /** The vehicle this one is attached to, e.g. the boat a trailer carries. */
+  parent_vehicle_id: string | null;
   notes: string | null;
   archived: number;
   created_at: string;

@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS vehicle (
   current_engine_hours REAL,
   usage_updated_on     TEXT,
 
+  -- A trailer belongs to the boat it carries, a tender to its yacht. One level
+  -- deep and optional; clearing the parent leaves the vehicle standing alone
+  -- rather than deleting it with the other.
+  parent_vehicle_id    TEXT REFERENCES vehicle(id) ON DELETE SET NULL,
+
   notes                TEXT,
   archived             INTEGER NOT NULL DEFAULT 0,
   created_at           TEXT NOT NULL,

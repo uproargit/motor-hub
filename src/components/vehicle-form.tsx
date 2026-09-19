@@ -5,6 +5,7 @@ import { useActionState, useState } from "react";
 
 import type { FormState } from "@/lib/actions/shared";
 import { VEHICLE_TYPES, VEHICLE_TYPE_KEYS, type VehicleType } from "@/lib/domain";
+import { vehicleTitle } from "@/lib/part-logic";
 import type { VehicleRow } from "@/lib/types";
 
 import { Field, FormError, FormSection, Input, MoneyInput, Select, SubmitButton, Textarea } from "./form";
@@ -17,11 +18,14 @@ const TYPE_OPTIONS = VEHICLE_TYPE_KEYS.map((key) => ({
 export function VehicleForm({
   action,
   vehicle,
+  parentOptions,
   cancelHref,
   submitLabel,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   vehicle: VehicleRow | null;
+  /** Vehicles this one may be attached to. Empty means the field is pointless. */
+  parentOptions: VehicleRow[];
   cancelHref: string;
   submitLabel: string;
 }) {
@@ -122,6 +126,35 @@ export function VehicleForm({
           </Field>
         ) : null}
       </FormSection>
+
+      {parentOptions.length > 0 || vehicle?.parent_vehicle_id ? (
+        <FormSection
+          title="Goes with"
+          collapsible
+          defaultOpen={false}
+          description="For a trailer that carries a boat, or anything else that travels with another vehicle"
+        >
+          <Field
+            label="Belongs to"
+            htmlFor="parent_vehicle_id"
+            className="sm:col-span-2"
+            hint="It keeps its own parts, schedules and history — this only links the two."
+          >
+            <Select
+              id="parent_vehicle_id"
+              name="parent_vehicle_id"
+              defaultValue={vehicle?.parent_vehicle_id ?? ""}
+              options={[
+                { value: "", label: "Nothing — it stands alone" },
+                ...parentOptions.map((option) => ({
+                  value: option.id,
+                  label: vehicleTitle(option),
+                })),
+              ]}
+            />
+          </Field>
+        </FormSection>
+      ) : null}
 
       <FormSection title="Ownership" collapsible defaultOpen={false} description="Purchase details and notes">
         <Field label="Purchase date" htmlFor="purchased_on">

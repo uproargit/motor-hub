@@ -6,8 +6,11 @@ import { ScheduleCard } from "@/components/schedule";
 import { Card, CardHeader, EmptyState, Stat } from "@/components/ui";
 import { UsageForm } from "@/components/usage-form";
 import { formatDate } from "@/lib/dates";
+import { VEHICLE_TYPES } from "@/lib/domain";
 import { usageFieldsFor } from "@/lib/due";
+import { childrenOf } from "@/lib/fleet";
 import { formatHours, formatMiles, formatMoney, pluralize } from "@/lib/format";
+import { vehicleTitle } from "@/lib/part-logic";
 import {
   attentionItems,
   countParts,
@@ -15,6 +18,7 @@ import {
   getUsage,
   getVehicle,
   listParts,
+  listVehicles,
   vehicleCostSummary,
 } from "@/lib/queries";
 
@@ -24,12 +28,16 @@ export default async function VehicleOverviewPage({ params }: { params: Promise<
   if (!vehicle) notFound();
 
   const usage = getUsage(vehicle);
-  const [counts, costs, schedules, installed] = await Promise.all([
+  const [counts, costs, schedules, installed, fleet] = await Promise.all([
     countParts(vehicle.id),
     vehicleCostSummary(vehicle.id),
     attentionItems({ vehicleId: vehicle.id }),
     listParts(vehicle.id, { status: "CURRENT" }),
+    listVehicles(true),
   ]);
+
+  const attached = childrenOf(fleet, vehicle.id);
+  const parent = fleet.find((item) => item.id === vehicle.parent_vehicle_id) ?? null;
   const recent = await decorateParts(installed.slice(0, 6), usage);
 
   // attentionItems filters by level in JS, so asking for every level costs no
@@ -66,6 +74,23 @@ export default async function VehicleOverviewPage({ params }: { params: Promise<
           hint={vehicle.usage_updated_on ? `Updated ${formatDate(vehicle.usage_updated_on)}` : "No reading yet"}
         />
       </div>
+
+      {parent || attached.length > 0 ? (
+        <Card className="flex flex-wrap items-center gap-x-2 gap-y-1 px-5 py-3.5 text-sm">
+          <span className="text-muted">{parent ? "Goes with" : "Travels with"}</span>
+          {(parent ? [parent] : attached).map((item, index) => (
+            <span key={item.id} className="flex items-center gap-2">
+              {index > 0 ? <span className="text-faint">·</span> : null}
+              <Link href={`/vehicles/${item.id}`} className="font-semibold text-ink underline">
+                {VEHICLE_TYPES[item.vehicle_type].icon} {vehicleTitle(item)}
+              </Link>
+            </span>
+          ))}
+          <Link href={`/vehicles/${vehicle.id}/edit`} className="ml-auto text-xs text-muted underline">
+            Change
+          </Link>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <div className="space-y-6">

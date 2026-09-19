@@ -23,6 +23,7 @@ function vehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     current_mileage: null,
     current_engine_hours: null,
     usage_updated_on: null,
+    parent_vehicle_id: null,
     notes: null,
     archived: 0,
     created_at: "2026-01-01T00:00:00.000Z",
