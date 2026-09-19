@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 
 import { addPartAttachmentsAction } from "@/lib/actions/attachments";
-import { createScheduleAction, logServiceAction } from "@/lib/actions/maintenance";
+import { createScheduleAction, logServiceAction, updateScheduleAction } from "@/lib/actions/maintenance";
 import { removePartAction } from "@/lib/actions/parts";
 import type { FormState } from "@/lib/actions/shared";
 import { todayIso } from "@/lib/dates";
@@ -21,7 +21,18 @@ import {
 } from "@/lib/domain";
 import type { PartRow, ScheduleRow, VehicleRow } from "@/lib/types";
 
-import { Field, FormError, FormSuccess, Input, MoneyInput, Select, SubmitButton, Textarea } from "./form";
+import {
+  CheckboxField,
+  Field,
+  FormError,
+  FormSection,
+  FormSuccess,
+  Input,
+  MoneyInput,
+  Select,
+  SubmitButton,
+  Textarea,
+} from "./form";
 
 const TASK_OPTIONS = TASK_TYPE_KEYS.map((key) => ({ value: key, label: TASK_TYPES[key].label }));
 const PERFORMER_OPTIONS = INSTALLED_BY_KEYS.map((key) => ({ value: key, label: INSTALLED_BY[key] }));
@@ -80,6 +91,129 @@ export function AddScheduleForm({ part, vehicle }: { part: PartRow; vehicle: Veh
 
       <SubmitButton variant="secondary">Add schedule</SubmitButton>
     </form>
+  );
+}
+
+/**
+ * Edits an interval in place. Without this the only way to correct a number was
+ * to delete the schedule and add it again, which threw away its baseline.
+ */
+export function EditScheduleForm({ schedule, vehicle }: { schedule: ScheduleRow; vehicle: VehicleRow }) {
+  const [state, formAction] = useActionState<FormState, FormData>(updateScheduleAction, {});
+  const showMiles = vehicle.tracks_mileage === 1 || schedule.interval_miles != null;
+  const showHours = vehicle.tracks_engine_hours === 1 || schedule.interval_hours != null;
+
+  return (
+    <details className="mt-2 rounded-lg border border-line bg-base px-3 py-2">
+      <summary className="cursor-pointer text-xs font-medium text-muted">Edit this interval</summary>
+
+      <form action={formAction} className="mt-3 space-y-3">
+        <input type="hidden" name="schedule_id" value={schedule.id} />
+        <FormError message={state.error} />
+        {state.ok ? <FormSuccess message="Schedule updated." /> : null}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Task" htmlFor={`task_type_${schedule.id}`}>
+            <Select
+              id={`task_type_${schedule.id}`}
+              name="task_type"
+              options={TASK_OPTIONS}
+              defaultValue={schedule.task_type}
+            />
+          </Field>
+          <Field label="Label" htmlFor={`label_${schedule.id}`}>
+            <Input id={`label_${schedule.id}`} name="label" defaultValue={schedule.label ?? ""} />
+          </Field>
+          {showMiles ? (
+            <Field label="Every … miles" htmlFor={`interval_miles_${schedule.id}`}>
+              <Input
+                id={`interval_miles_${schedule.id}`}
+                name="interval_miles"
+                inputMode="numeric"
+                defaultValue={schedule.interval_miles ?? ""}
+              />
+            </Field>
+          ) : null}
+          {showHours ? (
+            <Field label="Every … engine hours" htmlFor={`interval_hours_${schedule.id}`}>
+              <Input
+                id={`interval_hours_${schedule.id}`}
+                name="interval_hours"
+                inputMode="decimal"
+                defaultValue={schedule.interval_hours ?? ""}
+              />
+            </Field>
+          ) : null}
+          <Field label="Every … months" htmlFor={`interval_months_${schedule.id}`}>
+            <Input
+              id={`interval_months_${schedule.id}`}
+              name="interval_months"
+              inputMode="numeric"
+              defaultValue={schedule.interval_months ?? ""}
+            />
+          </Field>
+          <Field label="When several are set" htmlFor={`trigger_mode_${schedule.id}`}>
+            <Select
+              id={`trigger_mode_${schedule.id}`}
+              name="trigger_mode"
+              options={[
+                { value: "FIRST", label: "Whichever comes first" },
+                { value: "LAST", label: "Only when all have elapsed" },
+              ]}
+              defaultValue={schedule.trigger_mode}
+            />
+          </Field>
+        </div>
+
+        <FormSection title="Interval starts from" collapsible defaultOpen={false}>
+          <Field
+            label="Date"
+            htmlFor={`base_on_${schedule.id}`}
+            hint="Logging a service moves this on for you."
+          >
+            <Input
+              id={`base_on_${schedule.id}`}
+              name="base_on"
+              type="date"
+              defaultValue={schedule.base_on ?? ""}
+            />
+          </Field>
+          {showMiles ? (
+            <Field label="Mileage" htmlFor={`base_mileage_${schedule.id}`}>
+              <Input
+                id={`base_mileage_${schedule.id}`}
+                name="base_mileage"
+                inputMode="numeric"
+                defaultValue={schedule.base_mileage ?? ""}
+              />
+            </Field>
+          ) : null}
+          {showHours ? (
+            <Field label="Engine hours" htmlFor={`base_hours_${schedule.id}`}>
+              <Input
+                id={`base_hours_${schedule.id}`}
+                name="base_hours"
+                inputMode="decimal"
+                defaultValue={schedule.base_hours ?? ""}
+              />
+            </Field>
+          ) : null}
+        </FormSection>
+
+        <Field label="Notes" htmlFor={`notes_${schedule.id}`}>
+          <Textarea id={`notes_${schedule.id}`} name="notes" rows={2} defaultValue={schedule.notes ?? ""} />
+        </Field>
+
+        <CheckboxField
+          name="is_active"
+          label="Active"
+          hint="Untick to stop this interval generating reminders."
+          defaultChecked={schedule.is_active === 1}
+        />
+
+        <SubmitButton variant="secondary">Save interval</SubmitButton>
+      </form>
+    </details>
   );
 }
 

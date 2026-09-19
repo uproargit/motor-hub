@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { TASK_TYPES, type TaskType } from "@/lib/domain";
 import type { DimensionDue, ScheduleDue } from "@/lib/due";
 import {
@@ -42,10 +44,13 @@ export function ScheduleCard({
   schedule,
   due,
   actions,
+  readingHref,
 }: {
   schedule: ScheduleRow;
   due: ScheduleDue;
   actions?: React.ReactNode;
+  /** Where to go to record the reading this schedule is waiting on. */
+  readingHref?: string;
 }) {
   const inactive = schedule.is_active === 0;
 
@@ -89,6 +94,14 @@ export function ScheduleCard({
           {due.unevaluable.length > 0
             ? ` (needs a current ${due.unevaluable.map((d) => DIMENSION_LABEL[d].toLowerCase()).join(" / ")} reading)`
             : ""}
+          {due.unevaluable.length > 0 && readingHref ? (
+            <>
+              {" "}
+              <Link href={readingHref} className="font-medium text-accent underline">
+                Record one
+              </Link>
+            </>
+          ) : null}
         </p>
       )}
 

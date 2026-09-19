@@ -113,10 +113,16 @@ export function vehicleDescription(vehicle: VehicleRow): string {
   return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
 }
 
+/**
+ * A recorded reading counts even when its meter is no longer tracked. The
+ * tracking flags decide which meters the vehicle is asked about; discarding a
+ * number that was already taken only strands any schedule measured in it, with
+ * no way back — the reading form would refuse to collect what it already has.
+ */
 export function usageOf(vehicle: VehicleRow, today: string): UsageSnapshot {
   return {
-    mileage: vehicle.tracks_mileage ? vehicle.current_mileage : null,
-    engineHours: vehicle.tracks_engine_hours ? vehicle.current_engine_hours : null,
+    mileage: vehicle.current_mileage,
+    engineHours: vehicle.current_engine_hours,
     today,
   };
 }

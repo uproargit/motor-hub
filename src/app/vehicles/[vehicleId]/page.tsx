@@ -6,6 +6,7 @@ import { ScheduleCard } from "@/components/schedule";
 import { Card, CardHeader, EmptyState, Stat } from "@/components/ui";
 import { UsageForm } from "@/components/usage-form";
 import { formatDate } from "@/lib/dates";
+import { usageFieldsFor } from "@/lib/due";
 import { formatHours, formatMiles, formatMoney, pluralize } from "@/lib/format";
 import {
   attentionItems,
@@ -23,13 +24,19 @@ export default async function VehicleOverviewPage({ params }: { params: Promise<
   if (!vehicle) notFound();
 
   const usage = getUsage(vehicle);
-  const [counts, costs, attention, installed] = await Promise.all([
+  const [counts, costs, schedules, installed] = await Promise.all([
     countParts(vehicle.id),
     vehicleCostSummary(vehicle.id),
-    attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
+    attentionItems({ vehicleId: vehicle.id }),
     listParts(vehicle.id, { status: "CURRENT" }),
   ]);
   const recent = await decorateParts(installed.slice(0, 6), usage);
+
+  // attentionItems filters by level in JS, so asking for every level costs no
+  // extra query and leaves the full schedule set for the reading form below.
+  const attention = schedules.filter((item) =>
+    item.due.level === "OVERDUE" || item.due.level === "DUE" || item.due.level === "DUE_SOON",
+  );
 
   return (
     <div className="space-y-6">
@@ -120,7 +127,7 @@ export default async function VehicleOverviewPage({ params }: { params: Promise<
         <div className="space-y-6">
           <Card>
             <CardHeader title="Current readings" subtitle="Everything due is calculated from these." />
-            <UsageForm vehicle={vehicle} />
+            <UsageForm vehicle={vehicle} fields={usageFieldsFor(vehicle, schedules.map((item) => item.schedule))} />
           </Card>
 
           <Card>

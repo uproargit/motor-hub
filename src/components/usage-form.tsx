@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { recordUsageAction } from "@/lib/actions/vehicles";
 import type { FormState } from "@/lib/actions/shared";
 import { todayIso } from "@/lib/dates";
+import { usageFieldsFor } from "@/lib/due";
 import type { VehicleRow } from "@/lib/types";
 
 import { Field, FormError, FormSuccess, Input, SubmitButton } from "./form";
@@ -12,8 +13,18 @@ import { Field, FormError, FormSuccess, Input, SubmitButton } from "./form";
 /**
  * Updating the odometer or hour meter is what moves every maintenance
  * calculation on the vehicle, so it lives right on the overview.
+ *
+ * `fields` decides which meters are offered. Callers that know the vehicle's
+ * schedules pass the answer in, so a schedule that needs a reading always has
+ * somewhere to get one — see `usageFieldsFor`.
  */
-export function UsageForm({ vehicle }: { vehicle: VehicleRow }) {
+export function UsageForm({
+  vehicle,
+  fields = usageFieldsFor(vehicle, []),
+}: {
+  vehicle: VehicleRow;
+  fields?: { mileage: boolean; engineHours: boolean };
+}) {
   const [state, formAction] = useActionState<FormState, FormData>(recordUsageAction, {});
 
   return (
@@ -23,7 +34,7 @@ export function UsageForm({ vehicle }: { vehicle: VehicleRow }) {
       {state.ok ? <FormSuccess message="Reading recorded." /> : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        {vehicle.tracks_mileage ? (
+        {fields.mileage ? (
           <Field label="Mileage" htmlFor="mileage">
             <Input
               id="mileage"
@@ -33,7 +44,7 @@ export function UsageForm({ vehicle }: { vehicle: VehicleRow }) {
             />
           </Field>
         ) : null}
-        {vehicle.tracks_engine_hours ? (
+        {fields.engineHours ? (
           <Field label="Engine hours" htmlFor="engine_hours">
             <Input
               id="engine_hours"

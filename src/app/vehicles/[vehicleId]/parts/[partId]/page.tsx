@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AddAttachmentsForm, AddScheduleForm, LogServiceForm } from "@/components/part-actions";
+import {
+  AddAttachmentsForm,
+  AddScheduleForm,
+  EditScheduleForm,
+  LogServiceForm,
+} from "@/components/part-actions";
 import { AttachmentGallery, partSubtitle } from "@/components/parts";
 import { ScheduleCard } from "@/components/schedule";
 import { Card, CardHeader, DetailList, EmptyState, Pill, StatusPill } from "@/components/ui";
@@ -199,6 +204,7 @@ export default async function PartDetailPage({
                     <ScheduleCard
                       schedule={schedule}
                       due={due}
+                      readingHref={`/vehicles/${vehicle.id}/maintenance`}
                       actions={
                         <>
                           <form action={toggleScheduleAction}>
@@ -216,6 +222,7 @@ export default async function PartDetailPage({
                         </>
                       }
                     />
+                    <EditScheduleForm schedule={schedule} vehicle={vehicle} />
                   </li>
                 ))}
               </ul>

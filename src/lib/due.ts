@@ -184,3 +184,25 @@ export function compareDue(a: ScheduleDue, b: ScheduleDue): number {
   const rank = DUE_LEVEL_RANK[a.level] - DUE_LEVEL_RANK[b.level];
   return rank !== 0 ? rank : b.urgency - a.urgency;
 }
+
+/**
+ * Which meter readings the vehicle should be able to record.
+ *
+ * The vehicle's own meters are the starting point, but a schedule can outvote
+ * them: an interval in engine hours is uncalculable without an hours reading,
+ * and hiding the field would leave "add a current reading to calculate" with
+ * nowhere to go. That happens when a meter is switched off after a schedule
+ * was attached to it.
+ */
+export function usageFieldsFor(
+  vehicle: { tracks_mileage: number; tracks_engine_hours: number },
+  schedules: Array<Pick<ScheduleRow, "interval_miles" | "interval_hours" | "is_active">>,
+): { mileage: boolean; engineHours: boolean } {
+  const active = schedules.filter((schedule) => schedule.is_active === 1);
+
+  return {
+    mileage: vehicle.tracks_mileage === 1 || active.some((schedule) => schedule.interval_miles != null),
+    engineHours:
+      vehicle.tracks_engine_hours === 1 || active.some((schedule) => schedule.interval_hours != null),
+  };
+}

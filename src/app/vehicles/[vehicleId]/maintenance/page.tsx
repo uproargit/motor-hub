@@ -7,7 +7,7 @@ import { UsageForm } from "@/components/usage-form";
 import { formatDate } from "@/lib/dates";
 import { DUE_LEVEL_LABEL, formatHours, formatMiles } from "@/lib/format";
 import { attentionItems, getVehicle, listUsageReadings } from "@/lib/queries";
-import type { DueLevel } from "@/lib/due";
+import { usageFieldsFor, type DueLevel } from "@/lib/due";
 
 const SECTIONS: Array<{ level: DueLevel; tone: "bad" | "warn" | "good" | "muted" }> = [
   { level: "OVERDUE", tone: "bad" },
@@ -101,7 +101,7 @@ export default async function VehicleMaintenancePage({
         <div className="space-y-6">
           <Card>
             <CardHeader title="Update readings" subtitle="Due dates recalculate immediately." />
-            <UsageForm vehicle={vehicle} />
+            <UsageForm vehicle={vehicle} fields={usageFieldsFor(vehicle, items.map((item) => item.schedule))} />
           </Card>
 
           <Card>
