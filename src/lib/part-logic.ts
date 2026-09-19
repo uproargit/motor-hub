@@ -126,3 +126,57 @@ export function usageOf(vehicle: VehicleRow, today: string): UsageSnapshot {
     today,
   };
 }
+
+/* ------------------------------------------------------ cost roll-ups ---- */
+
+export interface VehicleCostSummary {
+  modificationCents: number;
+  maintenanceCents: number;
+  partsCents: number;
+  laborCents: number;
+  serviceCents: number;
+  totalCents: number;
+}
+
+export interface CostRow {
+  modification_cents: number | null;
+  maintenance_cents: number | null;
+  parts_cents: number | null;
+  labor_cents: number | null;
+}
+
+export interface CountRow {
+  total: number | null;
+  installed: number | null;
+  modifications: number | null;
+}
+
+/**
+ * Turns the summed columns into a summary.
+ *
+ * `SUM()` over no rows is NULL, so a vehicle with nothing recorded has to read
+ * as zero rather than as a missing figure. Shared by the per-vehicle read and
+ * the whole-fleet one so the two cannot drift apart.
+ */
+export function costSummaryFrom(row: CostRow | null, serviceCents: number | null): VehicleCostSummary {
+  const modificationCents = row?.modification_cents ?? 0;
+  const maintenanceCents = row?.maintenance_cents ?? 0;
+  const service = serviceCents ?? 0;
+
+  return {
+    modificationCents,
+    maintenanceCents,
+    partsCents: row?.parts_cents ?? 0,
+    laborCents: row?.labor_cents ?? 0,
+    serviceCents: service,
+    totalCents: modificationCents + maintenanceCents + service,
+  };
+}
+
+export function partCountsFrom(row: CountRow | null): { total: number; installed: number; modifications: number } {
+  return {
+    total: row?.total ?? 0,
+    installed: row?.installed ?? 0,
+    modifications: row?.modifications ?? 0,
+  };
+}

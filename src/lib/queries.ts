@@ -12,7 +12,16 @@ import {
   type PartStatus,
 } from "./domain";
 import { compareDue, evaluateSchedule, type ScheduleDue } from "./due";
-import { isOnVehicle, totalInstalledCents, usageOf } from "./part-logic";
+import {
+  costSummaryFrom,
+  isOnVehicle,
+  partCountsFrom,
+  totalInstalledCents,
+  usageOf,
+  type CostRow,
+  type CountRow,
+  type VehicleCostSummary,
+} from "./part-logic";
 import type {
   AttachmentRow,
   PartRow,
@@ -26,6 +35,18 @@ import type {
 /** Sums the four cost columns; used wherever totals are aggregated in SQL. */
 const COST_SUM =
   "COALESCE(part_cost_cents,0) + COALESCE(labor_cost_cents,0) + COALESCE(shipping_cost_cents,0) + COALESCE(tax_cents,0)";
+
+/** The summed columns behind every cost and count roll-up, per vehicle or fleet-wide. */
+const COST_COLUMNS = `
+  SUM(CASE WHEN is_modification = 1 THEN ${COST_SUM} ELSE 0 END) AS modification_cents,
+  SUM(CASE WHEN is_modification = 0 THEN ${COST_SUM} ELSE 0 END) AS maintenance_cents,
+  SUM(COALESCE(part_cost_cents,0) + COALESCE(shipping_cost_cents,0) + COALESCE(tax_cents,0)) AS parts_cents,
+  SUM(COALESCE(labor_cost_cents,0)) AS labor_cents`;
+
+const COUNT_COLUMNS = `
+  COUNT(*) AS total,
+  SUM(CASE WHEN status = 'INSTALLED' THEN 1 ELSE 0 END) AS installed,
+  SUM(CASE WHEN status = 'INSTALLED' AND is_modification = 1 THEN 1 ELSE 0 END) AS modifications`;
 
 /* -------------------------------------------------------------- vehicles -- */
 
@@ -112,20 +133,7 @@ export function getPart(id: string): Promise<PartRow | null> {
 export async function countParts(
   vehicleId: string,
 ): Promise<{ installed: number; total: number; modifications: number }> {
-  const row = await one<{ installed: number | null; total: number | null; modifications: number | null }>(
-    `SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN status = 'INSTALLED' THEN 1 ELSE 0 END) AS installed,
-        SUM(CASE WHEN status = 'INSTALLED' AND is_modification = 1 THEN 1 ELSE 0 END) AS modifications
-      FROM part WHERE vehicle_id = ?`,
-    [vehicleId],
-  );
-
-  return {
-    installed: row?.installed ?? 0,
-    total: row?.total ?? 0,
-    modifications: row?.modifications ?? 0,
-  };
+  return partCountsFrom(await one<CountRow>(`SELECT ${COUNT_COLUMNS} FROM part WHERE vehicle_id = ?`, [vehicleId]));
 }
 
 /* ------------------------------------------------------------- schedules -- */
@@ -371,31 +379,11 @@ export async function partLineage(part: PartRow): Promise<PartRow[]> {
 
 /* ------------------------------------------------------------ roll-ups ---- */
 
-export interface VehicleCostSummary {
-  modificationCents: number;
-  maintenanceCents: number;
-  partsCents: number;
-  laborCents: number;
-  serviceCents: number;
-  totalCents: number;
-}
+export type { VehicleCostSummary } from "./part-logic";
 
 export async function vehicleCostSummary(vehicleId: string): Promise<VehicleCostSummary> {
   const [parts, service] = await Promise.all([
-    one<{
-      modification_cents: number | null;
-      maintenance_cents: number | null;
-      parts_cents: number | null;
-      labor_cents: number | null;
-    }>(
-      `SELECT
-          SUM(CASE WHEN is_modification = 1 THEN ${COST_SUM} ELSE 0 END) AS modification_cents,
-          SUM(CASE WHEN is_modification = 0 THEN ${COST_SUM} ELSE 0 END) AS maintenance_cents,
-          SUM(COALESCE(part_cost_cents,0) + COALESCE(shipping_cost_cents,0) + COALESCE(tax_cents,0)) AS parts_cents,
-          SUM(COALESCE(labor_cost_cents,0)) AS labor_cents
-        FROM part WHERE vehicle_id = ?`,
-      [vehicleId],
-    ),
+    one<CostRow>(`SELECT ${COST_COLUMNS} FROM part WHERE vehicle_id = ?`, [vehicleId]),
     one<{ total: number | null }>(
       `SELECT SUM(r.cost_cents) AS total FROM service_record r
          JOIN part p ON p.id = r.part_id
@@ -404,17 +392,43 @@ export async function vehicleCostSummary(vehicleId: string): Promise<VehicleCost
     ),
   ]);
 
-  const summary: VehicleCostSummary = {
-    modificationCents: parts?.modification_cents ?? 0,
-    maintenanceCents: parts?.maintenance_cents ?? 0,
-    partsCents: parts?.parts_cents ?? 0,
-    laborCents: parts?.labor_cents ?? 0,
-    serviceCents: service?.total ?? 0,
-    totalCents: 0,
-  };
+  return costSummaryFrom(parts, service?.total ?? null);
+}
 
-  summary.totalCents = summary.modificationCents + summary.maintenanceCents + summary.serviceCents;
-  return summary;
+/**
+ * Costs for every vehicle at once, for pages that show the whole fleet.
+ *
+ * Two queries whatever the fleet size, rather than two per vehicle: each
+ * round-trip to a hosted database costs real latency, and the fleet list used
+ * to pay it once per card.
+ */
+export async function costSummaryByVehicle(): Promise<Map<string, VehicleCostSummary>> {
+  const [parts, service] = await Promise.all([
+    all<CostRow & { vehicle_id: string }>(
+      `SELECT vehicle_id, ${COST_COLUMNS} FROM part GROUP BY vehicle_id`,
+    ),
+    all<{ vehicle_id: string; total: number | null }>(
+      `SELECT p.vehicle_id AS vehicle_id, SUM(r.cost_cents) AS total
+         FROM service_record r
+         JOIN part p ON p.id = r.part_id
+        GROUP BY p.vehicle_id`,
+    ),
+  ]);
+
+  const serviceByVehicle = new Map(service.map((row) => [row.vehicle_id, row.total]));
+
+  return new Map(
+    parts.map((row) => [row.vehicle_id, costSummaryFrom(row, serviceByVehicle.get(row.vehicle_id) ?? null)]),
+  );
+}
+
+/** Part counts for every vehicle at once. One query, same shape as countParts. */
+export async function countPartsByVehicle(): Promise<Map<string, ReturnType<typeof partCountsFrom>>> {
+  const rows = await all<CountRow & { vehicle_id: string }>(
+    `SELECT vehicle_id, ${COUNT_COLUMNS} FROM part GROUP BY vehicle_id`,
+  );
+
+  return new Map(rows.map((row) => [row.vehicle_id, partCountsFrom(row)]));
 }
 
 export interface AttentionItem {
@@ -432,11 +446,15 @@ export interface AttentionItem {
  * dashboard.
  */
 export async function attentionItems(
-  options: { vehicleId?: string; levels?: ScheduleDue["level"][] } = {},
+  options: { vehicleId?: string; levels?: ScheduleDue["level"][]; fleet?: VehicleRow[] } = {},
 ): Promise<AttentionItem[]> {
-  const vehicles = options.vehicleId
-    ? ([await getVehicle(options.vehicleId)].filter((vehicle): vehicle is VehicleRow => vehicle != null))
-    : await listVehicles();
+  // A caller that has already loaded the fleet passes it in rather than paying
+  // for the same read twice.
+  const vehicles = options.fleet
+    ? options.fleet
+    : options.vehicleId
+      ? ([await getVehicle(options.vehicleId)].filter((vehicle): vehicle is VehicleRow => vehicle != null))
+      : await listVehicles();
 
   if (vehicles.length === 0) return [];
 

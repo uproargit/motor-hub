@@ -5,36 +5,34 @@ import { formatDate } from "@/lib/dates";
 import { VEHICLE_TYPES } from "@/lib/domain";
 import { formatHours, formatMiles, formatMoney, pluralize } from "@/lib/format";
 import { childrenOf, groupedFleet } from "@/lib/fleet";
-import { vehicleTitle, vehicleDescription } from "@/lib/part-logic";
-import { attentionItems, countParts, listVehicles, vehicleCostSummary } from "@/lib/queries";
+import { costSummaryFrom, partCountsFrom, vehicleTitle, vehicleDescription } from "@/lib/part-logic";
+import { attentionItems, costSummaryByVehicle, countPartsByVehicle, listVehicles } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function VehiclesPage() {
+  // Every roll-up is fetched for the whole fleet at once. Per-vehicle reads
+  // here would cost three round-trips per card, which grows with the fleet.
   const fleet = await listVehicles(true);
+
+  const [countsByVehicle, costsByVehicle, attention] = await Promise.all([
+    countPartsByVehicle(),
+    costSummaryByVehicle(),
+    attentionItems({ fleet, levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
+  ]);
+
   const vehicles = groupedFleet(fleet);
   const byId = new Map(fleet.map((vehicle) => [vehicle.id, vehicle]));
 
-  // Each card needs its own rollups, so they are gathered up front rather than
-  // fetched inside the render.
-  const cards = await Promise.all(
-    vehicles.map(async (vehicle) => {
-      const [counts, costs, attention] = await Promise.all([
-        countParts(vehicle.id),
-        vehicleCostSummary(vehicle.id),
-        attentionItems({ vehicleId: vehicle.id, levels: ["OVERDUE", "DUE", "DUE_SOON"] }),
-      ]);
-      return {
-        vehicle,
-        counts,
-        costs,
-        attention,
-        type: VEHICLE_TYPES[vehicle.vehicle_type],
-        parent: vehicle.parent_vehicle_id ? (byId.get(vehicle.parent_vehicle_id) ?? null) : null,
-        attached: childrenOf(fleet, vehicle.id),
-      };
-    }),
-  );
+  const cards = vehicles.map((vehicle) => ({
+    vehicle,
+    counts: countsByVehicle.get(vehicle.id) ?? partCountsFrom(null),
+    costs: costsByVehicle.get(vehicle.id) ?? costSummaryFrom(null, null),
+    attention: attention.filter((item) => item.vehicle.id === vehicle.id),
+    type: VEHICLE_TYPES[vehicle.vehicle_type],
+    parent: vehicle.parent_vehicle_id ? (byId.get(vehicle.parent_vehicle_id) ?? null) : null,
+    attached: childrenOf(fleet, vehicle.id),
+  }));
 
   return (
     <div className="space-y-6">
