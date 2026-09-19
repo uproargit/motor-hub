@@ -14,7 +14,7 @@ import { DuePill, Pill, StatusPill } from "./ui";
 export function partSubtitle(part: PartDetail["part"]): string {
   const bits = [part.manufacturer, part.part_number ? `#${part.part_number}` : null];
   if (part.quantity !== 1) bits.push(`×${part.quantity}`);
-  return bits.filter(Boolean).join(" · ");
+  return bits.filter(Boolean).join(", ");
 }
 
 /**

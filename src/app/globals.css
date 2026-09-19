@@ -21,80 +21,103 @@
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/*
+ * Workshop daylight. Bone paper and graphite ink, the way a service record is
+ * kept; coolant green and oxide red are the only colours, taken from the
+ * machines themselves. On-schedule work stays in plain ink so that a red row is
+ * the only thing on the page that raises its voice.
+ */
 :root {
-  --canvas: #f4f5f7;
-  --surface: #ffffff;
-  --raised: #fafbfc;
-  --line: #e3e6ea;
-  --line-strong: #cfd4da;
-  --ink: #16191d;
-  --muted: #5c646e;
-  --faint: #8b939d;
-  --accent: #b4530a;
-  --accent-soft: #fdf1e5;
-  --on-accent: #ffffff;
-  --good: #11704a;
-  --good-soft: #e6f4ee;
-  --warn: #8a5a00;
-  --warn-soft: #fdf3e0;
-  --bad: #a61f2b;
-  --bad-soft: #fceced;
-  --info: #17557f;
-  --info-soft: #e8f1f8;
+  --canvas: #edeae4;
+  --surface: #f7f5f1;
+  --raised: #e5e1d9;
+  --line: #d4cfc5;
+  --line-strong: #b3ada0;
+  --ink: #23262a;
+  --muted: #646b72;
+  --faint: #8d9298;
+  --accent: #00705d;
+  --accent-soft: #d9e8e3;
+  --on-accent: #f7f5f1;
+  --good: #00705d;
+  --good-soft: #d9e8e3;
+  --warn: #8c6000;
+  --warn-soft: #f0e6cd;
+  --bad: #a52e18;
+  --bad-soft: #f2dcd6;
+  --info: #23262a;
+  --info-soft: #e5e1d9;
 }
 
 :root:not([data-theme="light"]) {
   @media (prefers-color-scheme: dark) {
-    --canvas: #0d1013;
-    --surface: #15191e;
-    --raised: #1c2128;
-    --line: #272d35;
-    --line-strong: #39414b;
-    --ink: #e9edf2;
-    --muted: #9aa4b1;
-    --faint: #6b7683;
-    --accent: #f08a2c;
-    --accent-soft: #33210f;
-    --on-accent: #1a1005;
-    --good: #43c18b;
-    --good-soft: #10281f;
-    --warn: #e0a534;
-    --warn-soft: #2d2411;
-    --bad: #f0707e;
-    --bad-soft: #31161b;
-    --info: #63aede;
-    --info-soft: #11242f;
+    --canvas: #15181a;
+    --surface: #1c2022;
+    --raised: #24282b;
+    --line: #31363a;
+    --line-strong: #474e53;
+    --ink: #e9e6df;
+    --muted: #9aa1a6;
+    --faint: #6e767c;
+    --accent: #3cc3a5;
+    --accent-soft: #0d2a25;
+    --on-accent: #0b1f1b;
+    --good: #3cc3a5;
+    --good-soft: #0d2a25;
+    --warn: #d5a03c;
+    --warn-soft: #2b2311;
+    --bad: #e2664c;
+    --bad-soft: #2f1913;
+    --info: #e9e6df;
+    --info-soft: #24282b;
   }
 }
 
 :root[data-theme="dark"] {
-  --canvas: #0d1013;
-  --surface: #15191e;
-  --raised: #1c2128;
-  --line: #272d35;
-  --line-strong: #39414b;
-  --ink: #e9edf2;
-  --muted: #9aa4b1;
-  --faint: #6b7683;
-  --accent: #f08a2c;
-  --accent-soft: #33210f;
-  --on-accent: #1a1005;
-  --good: #43c18b;
-  --good-soft: #10281f;
-  --warn: #e0a534;
-  --warn-soft: #2d2411;
-  --bad: #f0707e;
-  --bad-soft: #31161b;
-  --info: #63aede;
-  --info-soft: #11242f;
+  --canvas: #15181a;
+  --surface: #1c2022;
+  --raised: #24282b;
+  --line: #31363a;
+  --line-strong: #474e53;
+  --ink: #e9e6df;
+  --muted: #9aa1a6;
+  --faint: #6e767c;
+  --accent: #3cc3a5;
+  --accent-soft: #0d2a25;
+  --on-accent: #0b1f1b;
+  --good: #3cc3a5;
+  --good-soft: #0d2a25;
+  --warn: #d5a03c;
+  --warn-soft: #2b2311;
+  --bad: #e2664c;
+  --bad-soft: #2f1913;
+  --info: #e9e6df;
+  --info-soft: #24282b;
 }
 
 html {
   color-scheme: light dark;
+}
+
+/* Keyboard users get the same ledger rule the design uses everywhere else. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 body {
@@ -112,18 +135,37 @@ textarea {
 }
 
 @layer components {
+  /*
+   * Two type roles, both Archivo, separated by the width axis rather than by a
+   * second family. Headings are set wide and tight; readouts are the large
+   * figures the app exists to show, and are always tabular so digits do not
+   * shift as a number counts down.
+   */
+  .display {
+    font-stretch: 115%;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+  }
+
+  .readout {
+    font-stretch: 125%;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+  }
+
   .field {
-    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink
+    @apply w-full border border-line bg-surface px-3 py-2 text-sm text-ink
       outline-none transition placeholder:text-faint
       focus:border-accent focus:ring-2 focus:ring-accent/25;
   }
 
   .label {
-    @apply block text-xs font-semibold uppercase tracking-wide text-muted;
+    @apply block text-sm text-muted;
   }
 
   .card {
-    @apply rounded-xl border border-line bg-surface;
+    @apply border border-line bg-surface;
   }
 
   /* Tailwind v4 cannot @apply a class defined in plain CSS, so each button
@@ -133,7 +175,7 @@ textarea {
   .btn-secondary,
   .btn-ghost,
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 text-sm font-semibold
       transition disabled:cursor-not-allowed disabled:opacity-60;
   }
 

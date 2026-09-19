@@ -90,6 +90,22 @@ export const DUE_LEVEL_ICON: Record<DueLevel, string> = {
   UNKNOWN: "⚪",
 };
 
+/**
+ * The remaining amount split into its figure and its unit, for places that set
+ * the number large and the unit small. Overdue comes back as a positive figure
+ * with a flag, because the minus sign belongs to the wording around it.
+ */
+export function remainingParts(
+  due: ScheduleDue,
+): { value: string; unit: string; overdue: boolean } | null {
+  const governing = due.governing;
+  if (!governing) return null;
+
+  const [value, ...unit] = formatDimensionAmount(governing.dimension, governing.remaining).split(" ");
+
+  return { value, unit: unit.join(" "), overdue: governing.remaining < 0 };
+}
+
 /** "58 hours remaining", "overdue by 18 days", "due now". */
 export function describeRemaining(due: ScheduleDue): string {
   const governing = due.governing;

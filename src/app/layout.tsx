@@ -1,12 +1,30 @@
 import type { Metadata } from "next";
+import { Archivo } from "next/font/google";
 import Link from "next/link";
 
 import { cookies } from "next/headers";
 
+import { ThemeToggle } from "@/components/theme-toggle";
 import { signOutAction } from "@/lib/actions/auth";
 import { isSignedIn, SESSION_COOKIE } from "@/lib/auth";
 
 import "./globals.css";
+
+// One family across the whole app, carrying its own width axis: headings are
+// set expanded, everything else normal. Tabular figures matter more here than a
+// second typeface would.
+const archivo = Archivo({
+  subsets: ["latin"],
+  axes: ["wdth"],
+  display: "swap",
+  variable: "--font-archivo",
+});
+
+/**
+ * Applies the stored appearance before first paint. Without it a reader who
+ * chose Night sees a bone-white flash on every navigation.
+ */
+const THEME_SCRIPT = `try{var t=localStorage.getItem("motor-hub-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}`;
 
 export const metadata: Metadata = {
   title: "Motor Hub",
@@ -27,14 +45,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const signedIn = await isSignedIn((await cookies()).get(SESSION_COOKIE)?.value);
 
   return (
-    <html lang="en">
+    <html lang="en" className={archivo.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-screen">
         <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-            <Link href="/" className="flex items-center gap-2 font-bold tracking-tight text-ink">
-              <span aria-hidden className="text-lg">
-                🔧
-              </span>
+            <Link href="/" className="display text-base text-ink">
               Motor Hub
             </Link>
             <nav className="flex items-center gap-1 text-sm">
@@ -42,23 +60,26 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="rounded-lg px-3 py-1.5 font-medium text-muted transition hover:bg-raised hover:text-ink"
+                  className="px-2 py-1 font-medium text-muted underline-offset-4 transition hover:text-ink hover:underline"
                 >
                   {item.label}
                 </Link>
               ))}
             </nav>
 
+            <div className="ml-auto flex items-center gap-2">
+              <ThemeToggle />
             {signedIn ? (
-              <form action={signOutAction} className="ml-auto">
+              <form action={signOutAction}>
                 <button
                   type="submit"
-                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted transition hover:bg-raised hover:text-ink"
+                  className="px-2 py-1 text-sm font-medium text-muted underline-offset-4 transition hover:text-ink hover:underline"
                 >
                   Sign out
                 </button>
               </form>
             ) : null}
+            </div>
           </div>
         </header>
 
